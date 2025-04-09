@@ -34,9 +34,8 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
         )
     
     def laycast(self, position:np.ndarray, quaternion:np.ndarray, lidar_reach: float) -> np.ndarray:
-        # you need to change this term  to get other lidar result 
-        # 360 granuality implementation
-        NUM_RAY = 4        
+        # You need to change this term to change lidar observation.
+        NUM_RAY = 4 
         R = p.getMatrixFromQuaternion(quaternion)
         R = np.array(R).reshape(3,3)
         ray_from = [position for _ in range(NUM_RAY)]
@@ -47,11 +46,12 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
                         ])
                   for d_theta in range(NUM_RAY)]
         
+        # code for visualize
         line_color = [0, 1, 0]
         for i in range(NUM_RAY):
             p.addUserDebugLine(ray_from[i], ray_to[i], line_color)
-
-        #print(p.rayTestBatch(ray_from,ray_to,4)[0])
+        # ---
+        
         distances = [normalized_dist* lidar_reach 
                      for ray_id, body_id, normalized_dist, xyz, direction in p.rayTestBatch(ray_from,ray_to,4)]
         return np.array(distances)
