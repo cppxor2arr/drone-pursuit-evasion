@@ -6,32 +6,8 @@ from PyFlyt.pz_envs.quadx_envs.ma_quadx_hover_env import MAQuadXHoverEnv #MAQuad
 import math
 
 class LidarDroneBaseEnv(MAQuadXHoverEnv):
-    def __init__(
-        self,
-        start_pos: np.ndarray = np.array(
-            [[-1.0, -1.0, 1.0], [1.0, -1.0, 1.0], [-1.0, 1.0, 1.0], [1.0, 1.0, 1.0]]
-        ),
-        start_orn: np.ndarray = np.array(
-            [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]
-        ),
-        sparse_reward: bool = False,
-        flight_mode: int = 0,
-        flight_dome_size: float = 10.0,
-        max_duration_seconds: float = 30.0,
-        angle_representation: Literal["euler", "quaternion"] = "quaternion",
-        agent_hz: int = 40,
-        render_mode: None | str = None,
-    ):
-        super().__init__(
-            start_pos=start_pos,
-            start_orn=start_orn,
-            flight_mode=flight_mode,
-            flight_dome_size=flight_dome_size,
-            max_duration_seconds=max_duration_seconds,
-            angle_representation=angle_representation,
-            agent_hz=agent_hz,
-            render_mode=render_mode,
-        )
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
     
     def laycast(self, position:np.ndarray, quaternion:np.ndarray, lidar_reach: float) -> np.ndarray:
         # You need to change this term to change lidar observation.
