@@ -36,7 +36,7 @@ class Actions:
         return (v * self.length for v in self.vectors)
 
 class LidarDroneBaseEnv(MAQuadXHoverEnv):
-    def __init__(self, lidar_reach: float, num_ray: int, *args, **kwargs):
+    def __init__(self, lidar_reach: float, num_ray: int, angle_representations:str = "quaternion", *args, **kwargs):
         super().__init__(*args, **kwargs)
     
         self.lidar_reach = lidar_reach
@@ -78,36 +78,13 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
     def compute_observation_by_id(self, agent_id: int) -> np.ndarray:
         raw_state = self.compute_attitude_by_id(agent_id)
 
-        # state breakdown
-        ang_vel = raw_state[0]
-        ang_pos = raw_state[1]
-        lin_vel = raw_state[2]
-        lin_pos = raw_state[3]
         ang_vel, ang_pos, lin_vel, lin_pos, quaternion = raw_state
 
-        # depending on angle representation, return the relevant thing
-
-        if self.angle_representation == 0:
-            return np.concatenate(
+        return np.concatenate(
                 [
-                    lin_vel,
                     lin_pos,
+                    lin_vel,
                     self.laycast(lin_pos, quaternion),
-                    self.past_actions[agent_id],
-                    self.start_pos[agent_id],
                 ],
                 axis=-1,
             )
-        elif self.angle_representation == 1:
-            return np.concatenate(
-                [
-                    lin_vel,
-                    lin_pos,
-                    self.laycast(lin_pos, quaternion),
-                    self.past_actions[agent_id],
-                    self.start_pos[agent_id],
-                ],
-                axis=-1,
-            )
-        else:
-            raise AssertionError("Not supposed to end up here!")
