@@ -6,35 +6,47 @@ from PyFlyt.pz_envs.quadx_envs.ma_quadx_hover_env import MAQuadXHoverEnv #MAQuad
 import math
 
 class LidarDroneBaseEnv(MAQuadXHoverEnv):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, lidar_reach: float, num_ray: int, *args, **kwargs):
         super().__init__(*args, **kwargs)
     
-    def laycast(self, position:np.ndarray, quaternion:np.ndarray, lidar_reach: float, num_ray: int) -> np.ndarray:
+        self.lidar_reach = lidar_reach
+        self.num_ray = num_ray
+
+        translation_dim = velocity_dim = 3
+        target_position = 3
+        self._observation_space = spaces.Box(
+                    low=-np.inf,
+                    high=np.inf,
+                    shape=(translation_dim + velocity_dim + target_position + self.num_ray, ),
+                    dtype=np.float64,
+                )
+        self._action_space = spaces.Discrete(len(Actions()))
+
+    def laycast(self, position:np.ndarray, quaternion:np.ndarray) -> np.ndarray:
         # You need to change this term to change lidar observation.
         R = p.getMatrixFromQuaternion(quaternion)
         R = np.array(R).reshape(3,3)
-        ray_from = [position for _ in range(num_ray)]
+        ray_from = [position for _ in range(self.num_ray)]
         ray_to = [ position + R @ np.array([
-                                lidar_reach * math.sin(2. * math.pi * float(d_theta) / num_ray),
-                                lidar_reach * math.cos(2. * math.pi * float(d_theta) / num_ray),
+                                self.lidar_reach * math.sin(2. * math.pi * float(d_theta) / self.num_ray),
+                                self.lidar_reach * math.cos(2. * math.pi * float(d_theta) / self.num_ray),
                                 0
                                 ])
-                                for d_theta in range(num_ray)]
+                                for d_theta in range(self.num_ray)]
         
         # code for visualize
-        line_color = [0, 1, 0]
-        for i in range(num_ray):
-            p.addUserDebugLine(ray_from[i], ray_to[i], line_color)
+        # line_color = [0, 1, 0]
+        # for i in range(self.num_ray):
+        #     p.addUserDebugLine(ray_from[i], ray_to[i], line_color)
         # ---
         
         NUM_THREAD = 1
-        distances = [normalized_dist* lidar_reach 
+        distances = [normalized_dist* self.lidar_reach 
                      for ray_id, body_id, normalized_dist, xyz, direction in p.rayTestBatch(ray_from,ray_to,NUM_THREAD)]
         return np.array(distances)
     
     def compute_observation_by_id(self, agent_id: int) -> np.ndarray:
         raw_state = self.compute_attitude_by_id(agent_id)
-        aux_state = self.aviary.aux_state(agent_id)
 
         # state breakdown
         ang_vel = raw_state[0]
@@ -45,15 +57,12 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
 
         # depending on angle representation, return the relevant thing
 
-        lidar_length = 4; num_ray = 3
         if self.angle_representation == 0:
             return np.concatenate(
                 [
-                    ang_vel,
-                    ang_pos,
                     lin_vel,
                     lin_pos,
-                    self.laycast(lin_pos, quaternion, lidar_length, num_ray),
+                    self.laycast(lin_pos, quaternion),
                     self.past_actions[agent_id],
                     self.start_pos[agent_id],
                 ],
@@ -62,11 +71,9 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
         elif self.angle_representation == 1:
             return np.concatenate(
                 [
-                    ang_vel,
-                    quaternion,
                     lin_vel,
                     lin_pos,
-                    self.laycast(lin_pos, quaternion, lidar_length, num_ray),
+                    self.laycast(lin_pos, quaternion),
                     self.past_actions[agent_id],
                     self.start_pos[agent_id],
                 ],
