@@ -5,6 +5,36 @@ import pybullet as p
 from PyFlyt.pz_envs.quadx_envs.ma_quadx_hover_env import MAQuadXHoverEnv #MAQuadXBaseEnv
 import math
 
+class Actions:
+    def __init__(self, length: float = 1.):
+        self.norm = 1 / np.sqrt(3)
+        self.length = length
+        self.vectors = [
+            np.array([+1, +1, +1]) * self.norm,
+            np.array([+1, +1, -1]) * self.norm,
+            np.array([+1, -1, +1]) * self.norm,
+            np.array([+1, -1, -1]) * self.norm,
+            np.array([-1, +1, +1]) * self.norm,
+            np.array([-1, +1, -1]) * self.norm,
+            np.array([-1, -1, +1]) * self.norm,
+            np.array([-1, -1, -1]) * self.norm,
+            np.array([+1, 0, 0]),
+            np.array([0, +1, 0]),
+            np.array([0, 0, +1]),
+            np.array([-1, 0, 0]),
+            np.array([0, -1, 0]),
+            np.array([0, 0, -1]),
+        ]
+
+    def __getitem__(self, idx):
+        return self.vectors[idx] * self.length
+
+    def __len__(self):
+        return len(self.vectors)
+
+    def __iter__(self):
+        return (v * self.length for v in self.vectors)
+
 class LidarDroneBaseEnv(MAQuadXHoverEnv):
     def __init__(self, lidar_reach: float, num_ray: int, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -20,7 +50,7 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
                     shape=(translation_dim + velocity_dim + target_position + self.num_ray, ),
                     dtype=np.float64,
                 )
-        self._action_space = spaces.Discrete(len(Actions()))
+        self._action_space = spaces.Discrete(len(Actions(self.lidar_reach)))
 
     def laycast(self, position:np.ndarray, quaternion:np.ndarray) -> np.ndarray:
         # You need to change this term to change lidar observation.
