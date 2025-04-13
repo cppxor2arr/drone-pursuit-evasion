@@ -9,8 +9,9 @@ while env.agents:
     # this is where you would insert your policy
     actions = {agent: env.action_space(agent).sample() for agent in env.agents}
     #actions = {agent: [0,0,0,0] for agent in env.agents}
-    observations, rewards, terminations, truncations, infos = env.step(actions)
-    #print(observations)
-    for agent in env.agents:
-        print(env.action_space(agent).sample(), env.observation_space(agent))
+    observations, rewards, terminations, truncations, infos = env.step_pursuit_evade(actions)
+    print(observations)
+    print(actions)
+    # for agent in env.agents:
+    #     print(env.action_space(agent).sample(), env.observation_space(agent))
 env.close()
