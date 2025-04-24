@@ -114,7 +114,7 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
         )
 
     def compute_term_trunc_reward_info_by_id(
-        self, agent_id: int
+        self, agent_id: int, prev_observations: np.ndarray
     ) -> tuple[bool, bool, float, dict[str, Any]]:
         """Computes the termination, truncation, and reward of the current timestep."""
         # initialize
@@ -125,13 +125,13 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
 
         # collision
         if np.any(self.aviary.contact_array[self.aviary.drones[agent_id].Id]):
-            reward -= 100.0
+            reward -= 10.0
             info["collision"] = True
             term |= True
 
         # exceed flight dome
         if np.linalg.norm(self.aviary.state(agent_id)[-1]) > self.flight_dome_size:
-            reward -= 100.0
+            reward -= 10.0
             info["out_of_bounds"] = True
             term |= True
 
@@ -151,19 +151,6 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
         return term, trunc, reward, info
 
     def step(
-        self, actions: dict[str, int]
-    ) -> tuple[
-        dict[str, Any],
-        dict[str, float],
-        dict[str, bool],
-        dict[str, bool],
-        dict[str, dict[str, Any]],
-    ]:
-        # TODO we need to consider single agent step fucntion
-        assert True
-        return
-
-    def step_pursuit_evade(
         self, actions: dict[str, int]
     ) -> tuple[
         dict[str, Any],
@@ -204,7 +191,7 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
                 ag_id = self.agent_name_mapping[ag]
                 # compute term trunc reward
                 term, trunc, rew, info = self.compute_term_trunc_reward_info_by_id(
-                    ag_id
+                    ag_id, self.prev_observations
                 )
                 terminations[ag] |= term
                 truncations[ag] |= trunc
