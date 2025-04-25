@@ -206,6 +206,7 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
                     ]  # append pursuit and observation target
                 )
         # increment step count and cull dead agents for the next round
+        self.prev_observations = observations.copy()
         self.step_count += 1
         self.agents = [
             agent
@@ -227,4 +228,5 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
                 )
             for ag in self.agents
         }
+        self.prev_observations = observations.copy()
         return observations, infos
