@@ -214,3 +214,17 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
         ]
 
         return observations, rewards, terminations, truncations, infos
+
+    def reset(
+        self, seed=None, options=dict()
+    ) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
+        observations, infos = super().reset(seed, options)
+        observations = {
+            ag: np.concatenate([
+                    self.compute_observation_by_id(self.agent_name_mapping[ag]),
+                    self.compute_observation_by_id((self.agent_name_mapping[ag]+1) % self.num_agents)[:3] 
+                ] # append pursuit and observation target
+                )
+            for ag in self.agents
+        }
+        return observations, infos
