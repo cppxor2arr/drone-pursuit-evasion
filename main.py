@@ -12,16 +12,17 @@ env = LidarDroneBaseEnv(
     start_orn=np.array([[0, 0, 0], [0, 0, 0]]),
 )  # MAQuadXHoverEnvV2(render_mode="human")
 observations, infos = env.reset()
+print(observations)
 
 while env.agents:
     # this is where you would insert your policy
     actions = {agent: env.action_space(agent).sample() for agent in env.agents}
     # actions = {agent: [0,0,0,0] for agent in env.agents}
-    observations, rewards, terminations, truncations, infos = env.step_pursuit_evade(
-        actions
-    )
+
+    observations, rewards, terminations, truncations, infos = env.step(actions)
     print(observations)
     print(actions)
+    print(f"Reward: {rewards}")
     # for agent in env.agents:
     #     print(env.action_space(agent).sample(), env.observation_space(agent))
 env.close()

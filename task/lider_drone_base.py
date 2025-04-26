@@ -114,7 +114,7 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
         )
 
     def compute_term_trunc_reward_info_by_id(
-        self, agent_id: int
+        self, agent_id: int, prev_observations: dict[str, Any]
     ) -> tuple[bool, bool, float, dict[str, Any]]:
         """Computes the termination, truncation, and reward of the current timestep."""
         # initialize
@@ -159,19 +159,6 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
         dict[str, bool],
         dict[str, dict[str, Any]],
     ]:
-        # TODO we need to consider single agent step fucntion
-        assert True
-        return
-
-    def step_pursuit_evade(
-        self, actions: dict[str, int]
-    ) -> tuple[
-        dict[str, Any],
-        dict[str, float],
-        dict[str, bool],
-        dict[str, bool],
-        dict[str, dict[str, Any]],
-    ]:
         NUM_AGENT = len(actions.items())
         assert NUM_AGENT == 2
         for k, v in actions.items():
@@ -204,7 +191,7 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
                 ag_id = self.agent_name_mapping[ag]
                 # compute term trunc reward
                 term, trunc, rew, info = self.compute_term_trunc_reward_info_by_id(
-                    ag_id
+                    ag_id, self.prev_observations
                 )
                 terminations[ag] |= term
                 truncations[ag] |= trunc
@@ -219,6 +206,7 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
                     ]  # append pursuit and observation target
                 )
         # increment step count and cull dead agents for the next round
+        self.prev_observations = observations.copy()
         self.step_count += 1
         self.agents = [
             agent
@@ -227,3 +215,21 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
         ]
 
         return observations, rewards, terminations, truncations, infos
+
+    def reset(
+        self, seed=None, options=dict()
+    ) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
+        observations, infos = super().reset(seed, options)
+        observations = {
+            ag: np.concatenate(
+                [
+                    self.compute_observation_by_id(self.agent_name_mapping[ag]),
+                    self.compute_observation_by_id(
+                        (self.agent_name_mapping[ag] + 1) % self.num_agents
+                    )[:3],
+                ]  # append pursuit and observation target
+            )
+            for ag in self.agents
+        }
+        self.prev_observations = observations.copy()
+        return observations, infos
