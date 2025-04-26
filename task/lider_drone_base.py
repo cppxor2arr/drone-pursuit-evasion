@@ -125,28 +125,35 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
 
         # collision
         if np.any(self.aviary.contact_array[self.aviary.drones[agent_id].Id]):
-            reward -= 100.0
+            reward -= 10.0
             info["collision"] = True
             term |= True
 
         # exceed flight dome
         if np.linalg.norm(self.aviary.state(agent_id)[-1]) > self.flight_dome_size:
-            reward -= 100.0
+            reward -= 10.0
             info["out_of_bounds"] = True
             term |= True
 
-        # reward
+        other_agent_id = 1 if agent_id == 0 else 1
+
+        linear_pos = self.aviary.state(agent_id)[-1]
+        other_linear_pos = self.aviary.state(other_agent_id)[-1]
+        linear_distance = np.linalg.norm(other_linear_pos - linear_pos)
+
+        prev_linear_pos = prev_observations[f"uav_{agent_id}"][:3]
+        prev_other_linear_pos = prev_observations[f"uav_{other_agent_id}"][:3]
+        prev_linear_distance = np.linalg.norm(prev_other_linear_pos - prev_linear_pos)
+
+        # catch evader
+        catch_threshold = 0.1  # 10 centimeters
+        if linear_distance < catch_threshold:
+            reward += 10.0
+
+        # reward (change in distance)
         if not self.sparse_reward:
-            # distance from 0, 0, 1 hover point
-            linear_distance = np.linalg.norm(
-                self.aviary.state(agent_id)[-1] - self.start_pos[agent_id]
-            )
-
-            # how far are we from 0 roll pitch
-            angular_distance = np.linalg.norm(self.aviary.state(agent_id)[1][:2])
-
-            reward -= float(linear_distance + angular_distance * 0.1)
-            reward += 1.0
+            c = 1.0  # hyperparameter
+            reward += c * (prev_linear_distance - linear_distance)
 
         return term, trunc, reward, info
 
