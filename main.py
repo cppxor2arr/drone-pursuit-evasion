@@ -5,6 +5,12 @@ import numpy as np
 
 
 def render_flight_dome(env):
+    concaveSphereCollisionId = env.aviary.createCollisionShape(
+        shapeType=p.GEOM_MESH,
+        fileName="hi_res_sphere.obj",
+        meshScale=[-env.flight_dome_size] * 3,
+        flags=p.GEOM_FORCE_CONCAVE_TRIMESH,
+    )
     concaveSphereVisualId = env.aviary.createVisualShape(
         shapeType=p.GEOM_MESH,
         fileName="hi_res_sphere.obj",
@@ -14,10 +20,10 @@ def render_flight_dome(env):
     )
     concaveSphereId = env.aviary.createMultiBody(
         baseMass=0,
+        baseCollisionShapeIndex=concaveSphereCollisionId,
         baseVisualShapeIndex=concaveSphereVisualId,
         basePosition=[0.0, 0.0, 0.0],
         useMaximalCoordinates=True,
-        flags=0,
     )
     convexSphereVisualId = env.aviary.createVisualShape(
         shapeType=p.GEOM_MESH,
@@ -31,7 +37,6 @@ def render_flight_dome(env):
         baseVisualShapeIndex=convexSphereVisualId,
         basePosition=[0.0, 0.0, 0.0],
         useMaximalCoordinates=True,
-        flags=0,
     )
     env.aviary.register_all_new_bodies()
 
