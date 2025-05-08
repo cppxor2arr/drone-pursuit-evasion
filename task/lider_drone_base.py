@@ -100,7 +100,7 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
             shape=(translation_dim + velocity_dim + target_position + self.num_ray,),
             dtype=np.float64,
         )
-        self.actions = Actions(self.lidar_reach)
+        self.actions = Actions(1.0)
         self._action_space = spaces.Discrete(len(self.actions))
         
         # Store drone configurations
@@ -495,7 +495,7 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
                 shapeType=p.GEOM_MESH,
                 fileName="hi_res_sphere.obj",
                 meshScale=[-self.flight_dome_size] * 3,
-                rgbaColor=[1.0, 0.0, 0.0, 0.8],
+                rgbaColor=[0.2, 0.2, 1.0, 0.8],
                 specularColor=[0.4, 0.4, 0.4],
             )
             concaveSphereId = self.aviary.createMultiBody(
@@ -509,7 +509,7 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
                 shapeType=p.GEOM_MESH,
                 fileName="hi_res_sphere.obj",
                 meshScale=[self.flight_dome_size] * 3,
-                rgbaColor=[1.0, 0.0, 0.0, 0.8],
+                rgbaColor=[0.2, 0.2, 1.0, 0.8],
                 specularColor=[0.4, 0.4, 0.4],
             )
             convexSphereId = self.aviary.createMultiBody(
