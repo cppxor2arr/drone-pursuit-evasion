@@ -484,6 +484,41 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
     ) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
         try:
             observations, infos = super().reset(seed, options)
+
+            concaveSphereCollisionId = self.aviary.createCollisionShape(
+                shapeType=p.GEOM_MESH,
+                fileName="hi_res_sphere.obj",
+                meshScale=[-self.flight_dome_size] * 3,
+                flags=p.GEOM_FORCE_CONCAVE_TRIMESH,
+            )
+            concaveSphereVisualId = self.aviary.createVisualShape(
+                shapeType=p.GEOM_MESH,
+                fileName="hi_res_sphere.obj",
+                meshScale=[-self.flight_dome_size] * 3,
+                rgbaColor=[1.0, 0.0, 0.0, 0.8],
+                specularColor=[0.4, 0.4, 0.4],
+            )
+            concaveSphereId = self.aviary.createMultiBody(
+                baseMass=0,
+                baseCollisionShapeIndex=concaveSphereCollisionId,
+                baseVisualShapeIndex=concaveSphereVisualId,
+                basePosition=[0.0, 0.0, 0.0],
+                useMaximalCoordinates=True,
+            )
+            convexSphereVisualId = self.aviary.createVisualShape(
+                shapeType=p.GEOM_MESH,
+                fileName="hi_res_sphere.obj",
+                meshScale=[self.flight_dome_size] * 3,
+                rgbaColor=[1.0, 0.0, 0.0, 0.8],
+                specularColor=[0.4, 0.4, 0.4],
+            )
+            convexSphereId = self.aviary.createMultiBody(
+                baseMass=0,
+                baseVisualShapeIndex=convexSphereVisualId,
+                basePosition=[0.0, 0.0, 0.0],
+                useMaximalCoordinates=True,
+            )
+            self.aviary.register_all_new_bodies()
             
             try:
                 # Compute observations with target positions
