@@ -92,15 +92,15 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
         self.num_ray = num_ray
         self.render_simulation = render_simulation
 
-        translation_dim = velocity_dim = 3
+        velocity_dim = 3
         target_position = 3
         self._observation_space = spaces.Box(
             low=-np.inf,
             high=np.inf,
-            shape=(translation_dim + velocity_dim + target_position + self.num_ray,),
+            shape=(velocity_dim + target_position + self.num_ray,),
             dtype=np.float64,
         )
-        self.actions = Actions(1.0)
+        self.actions = Actions(4.0)
         self._action_space = spaces.Discrete(len(self.actions))
         
         # Store drone configurations
@@ -174,7 +174,6 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
 
             return np.concatenate(
                 [
-                    lin_pos,
                     lin_vel,
                     self.laycast(lin_pos, quaternion),
                 ],
@@ -183,7 +182,7 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
         except Exception as e:
             print(f"Error computing observation for agent {agent_id}: {e}")
             # Return a safe fallback observation with the correct shape
-            return np.zeros((6 + self.num_ray,), dtype=np.float64)
+            return np.zeros((3 + self.num_ray,), dtype=np.float64)
     
     def compute_distance_between_agents(self, agent_id: int, other_agent_id: int) -> float:
         """Compute the distance between two agents"""
@@ -205,8 +204,8 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
             return self.compute_distance_between_agents(agent_id, other_agent_id)
         
         try:
-            prev_linear_pos = self.prev_observations[agent_name][:3]
-            prev_other_linear_pos = self.prev_observations[other_agent_name][:3]
+            prev_linear_pos = self.prev_observations[other_agent_name][-3:]
+            prev_other_linear_pos = self.prev_observations[agent_name][-3:]
             return np.linalg.norm(prev_other_linear_pos - prev_linear_pos)
         except Exception as e:
             print(f"Error computing previous distance: {e}")
@@ -396,7 +395,7 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
                 infos = {}
                 
                 for agent_name in list(actions.keys()):
-                    observations[agent_name] = np.zeros((9 + self.num_ray,), dtype=np.float64)
+                    observations[agent_name] = np.zeros((6 + self.num_ray,), dtype=np.float64)
                     rewards[agent_name] = 0.0
                     terminations[agent_name] = True  # 에피소드 종료
                     truncations[agent_name] = False
@@ -408,8 +407,7 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
             
             for k, v in actions.items():
                 agent_idx = self.agent_name_mapping[k]
-                target_idx = int((agent_idx + 1) % NUM_AGENT)
-                x, y, z = self.compute_observation_by_id(target_idx)[:3]
+                x, y, z = self.compute_observation_by_id(agent_idx)[-3:]
                 dxdydz = self.actions[v]
 
                 next_x = x + dxdydz[0]
@@ -433,29 +431,29 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
                     self.aviary.step()
                 self.update_states()
 
-                for ag in self.agents:
-                    ag_id = self.agent_name_mapping[ag]
-                    # compute term trunc reward
-                    term, trunc, rew, info = self.compute_term_trunc_reward_info_by_id(
-                        ag_id, getattr(self, 'prev_observations', {})
-                    )
-                    terminations[ag] |= term
-                    truncations[ag] |= trunc
-                    rewards[ag] += rew
-                    infos[ag].update(info)
+            for ag in self.agents:
+                ag_id = self.agent_name_mapping[ag]
+                # compute term trunc reward
+                term, trunc, rew, info = self.compute_term_trunc_reward_info_by_id(
+                    ag_id, getattr(self, 'prev_observations', {})
+                )
+                terminations[ag] |= term
+                truncations[ag] |= trunc
+                rewards[ag] += rew
+                infos[ag].update(info)
 
-                    # compute observations
-                    try:
-                        observations[ag] = np.concatenate(
-                            [
-                                self.compute_observation_by_id(ag_id),
-                                self.compute_observation_by_id((ag_id + 1) % NUM_AGENT)[:3],
-                            ]  # append pursuit and observation target
-                        )
-                    except Exception as e:
-                        print(f"Error computing observations: {e}")
-                        # Return a safe fallback observation
-                        observations[ag] = np.zeros((9 + self.num_ray,), dtype=np.float64)
+                # compute observations
+                try:
+                    observations[ag] = np.concatenate(
+                        [
+                            self.compute_observation_by_id(ag_id),
+                            self.compute_attitude_by_id((ag_id + 1) % NUM_AGENT)[3],
+                        ]  # append pursuit and observation target
+                    )
+                except Exception as e:
+                    print(f"Error computing observations: {e}")
+                    # Return a safe fallback observation
+                    observations[ag] = np.zeros((6 + self.num_ray,), dtype=np.float64)
                         
             # increment step count and cull dead agents for the next round
             self.prev_observations = observations.copy()
@@ -466,12 +464,20 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
                 if not (terminations[agent] or truncations[agent])
             ]
 
+            # Transform other drone's position to relative position (reference frame: self)
+            for ag in self.agents:
+                ag_id = self.agent_name_mapping[ag]
+                left_ag_id = (ag_id - 1) % NUM_AGENT
+                left_ag = f"uav_{left_ag_id}"
+
+                observations[ag][-3:] -= self.prev_observations[left_ag][-3:]
+
             return observations, rewards, terminations, truncations, infos
         
         except Exception as e:
             print(f"Error in step method: {e}")
             # Return safe fallback values
-            observations = {agent: np.zeros((9 + self.num_ray,), dtype=np.float64) for agent in self.agents}
+            observations = {agent: np.zeros((6 + self.num_ray,), dtype=np.float64) for agent in self.agents}
             rewards = {agent: 0.0 for agent in self.agents}
             terminations = {agent: True for agent in self.agents}  # End episode on error
             truncations = {agent: False for agent in self.agents}
@@ -519,16 +525,16 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
                 useMaximalCoordinates=True,
             )
             self.aviary.register_all_new_bodies()
-            
+
+            NUM_AGENT = 2
+
             try:
                 # Compute observations with target positions
                 observations = {
                     ag: np.concatenate(
                         [
                             self.compute_observation_by_id(self.agent_name_mapping[ag]),
-                            self.compute_observation_by_id(
-                                (self.agent_name_mapping[ag] + 1) % self.num_agents
-                            )[:3],
+                            self.compute_attitude_by_id((self.agent_name_mapping[ag] + 1) % self.num_agents)[3],
                         ]  # append pursuit and observation target
                     )
                     for ag in self.agents
@@ -537,7 +543,7 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
                 print(f"Error computing initial observations: {e}")
                 # Return safe fallback observations
                 observations = {
-                    ag: np.zeros((9 + self.num_ray,), dtype=np.float64)
+                    ag: np.zeros((6 + self.num_ray,), dtype=np.float64)
                     for ag in self.agents
                 }
             
@@ -551,13 +557,21 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
             for agent_name, role in self.agent_roles.items():
                 role_info[agent_name] = role.name
             print(f"Agent roles: {role_info}")
-                
+
+            # Transform other drone's position to relative position (reference frame: self)
+            for ag in self.agents:
+                ag_id = self.agent_name_mapping[ag]
+                left_ag_id = (ag_id - 1) % NUM_AGENT
+                left_ag = f"uav_{left_ag_id}"
+
+                observations[ag][-3:] -= self.prev_observations[left_ag][-3:]
+
             return observations, infos
         
         except Exception as e:
             print(f"Error in reset method: {e}")
             # Return safe fallback values
-            observations = {agent: np.zeros((9 + self.num_ray,), dtype=np.float64) for agent in self.agents}
+            observations = {agent: np.zeros((6 + self.num_ray,), dtype=np.float64) for agent in self.agents}
             infos = {"error": str(e)}
             
             return observations, infos
