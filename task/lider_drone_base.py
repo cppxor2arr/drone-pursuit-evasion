@@ -407,7 +407,7 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
             
             for k, v in actions.items():
                 agent_idx = self.agent_name_mapping[k]
-                x, y, z = self.compute_observation_by_id(agent_idx)[-3:]
+                x, y, z = self.compute_observation_by_id((agent_idx + 1) % NUM_AGENT)[-3:]
                 dxdydz = self.actions[v]
 
                 next_x = x + dxdydz[0]
