@@ -141,34 +141,6 @@ class DroneDQNAgent():
         """무작위 행동 선택 (탐색)"""
         return self.action_space.sample()
     
-    def safe_random_action(self, observation: np.ndarray, boundary_threshold: float = 0.8) -> int:
-        """경계를 벗어나지 않는 안전한 무작위 행동 선택"""
-        # 기본적으로 완전 무작위 행동
-        action = self.action_space.sample()
-        
-        # 현재 위치
-        current_pos = observation[:3]
-        
-        # 현재 위치가 경계에 가까우면 중앙으로 돌아오는 행동 선택
-        distance_from_center = np.linalg.norm(current_pos)
-        if distance_from_center > boundary_threshold:
-            # 중앙 방향으로 이동하는 행동 선택
-            center_dir = -current_pos / distance_from_center  # 중앙 방향 단위 벡터
-            
-            best_action = action
-            best_alignment = -float('inf')
-            
-            # 가능한 모든 행동 중 중앙 방향과 가장 일치하는 것 선택
-            for i in range(self.action_space.n):
-                # 이 부분은 환경의 액션 공간 구현에 따라 조정 필요
-                # 환경의 action vectors에 접근할 수 있어야 함
-                # TODO: 환경의 액션 벡터 정보를 에이전트에 제공하는 방법 추가
-                pass
-                
-            return best_action
-            
-        return action
-    
     def exploit(self, observation: np.ndarray) -> np.ndarray:
         """현재 정책에 따라 최적 행동 선택 (활용)"""
         obs = torch.as_tensor(observation, dtype=torch.float32, device=self.device)
