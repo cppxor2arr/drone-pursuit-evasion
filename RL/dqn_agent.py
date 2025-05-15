@@ -20,15 +20,19 @@ class QNetwork(nn.Module):
             nn.ReLU(),
             nn.Linear(120, 84),
             nn.ReLU(),
+            nn.Linear(84, 84),
+            nn.ReLU(),
             nn.Linear(84, num_action),
+            nn.Softmax(dim=1)
         )
 
     def forward(self, x):
         return self.network(x)
 
 class ReplayBuffer:
-    def __init__(self, limit):
+    def __init__(self, limit, device: str = "cpu"):
         self.buffer = deque(maxlen=limit)
+        self.device = device
 
     def add(self, *transition):
         self.buffer.append(transition)
@@ -37,17 +41,21 @@ class ReplayBuffer:
         batch = random.sample(self.buffer, batch_size)
         s, a, r, s_prime, done = zip(*batch)
         
-        # 개별 리스트를 numpy 배열로 변환 후 텐서로 변환
+        # Convert lists to numpy arrays then to tensors and move to device
         return (
-            torch.from_numpy(np.array(s)).float(),
-            torch.from_numpy(np.array(a)).long(),
-            torch.from_numpy(np.array(r)).float(),
-            torch.from_numpy(np.array(s_prime)).float(),
-            torch.from_numpy(np.array(done)).float()
+            torch.from_numpy(np.array(s)).float().to(self.device),
+            torch.from_numpy(np.array(a)).long().to(self.device),
+            torch.from_numpy(np.array(r)).float().to(self.device),
+            torch.from_numpy(np.array(s_prime)).float().to(self.device),
+            torch.from_numpy(np.array(done)).float().to(self.device)
         )
 
     def __len__(self):
         return len(self.buffer)
+
+    def to(self, device: str) -> None:
+        """Move buffer to specified device"""
+        self.device = device
 
 # batch로 input이 들어오면 batch로 대응할 수 있는가? 
 # supersuit에 vframe으로 모았을 때, 아니면 bootstrapping한 sample을 여러개 batch로 돌릴때,
@@ -83,8 +91,8 @@ class DroneDQNAgent():
         # 네트워크 초기화
         num_obs = np.prod(observation_space.shape)
         num_action = action_space.n
-        self.q_net = QNetwork(num_obs, num_action)
-        self.target_network = QNetwork(num_obs, num_action)
+        self.q_net = QNetwork(num_obs, num_action).to(device)  # Move to device immediately
+        self.target_network = QNetwork(num_obs, num_action).to(device)  # Move to device immediately
         self.update_target_network()
         
         # 옵티마이저 초기화
@@ -230,7 +238,7 @@ class DroneDQNAgent():
 
     def create_buffer(self, buffer_size: int) -> ReplayBuffer:
         """Create a new replay buffer with the specified size"""
-        return ReplayBuffer(buffer_size)
+        return ReplayBuffer(buffer_size, self.device)
 
 # TODO: observation이 input으로 들어올 때엔 batch로 들어올 수 있으므로, 조심하기 
 # replace buffer는 stable baseline에서 구현 된 것 가져오기 

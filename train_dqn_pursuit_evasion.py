@@ -14,7 +14,7 @@ torch.manual_seed(RANDOM_SEED)
 random.seed(RANDOM_SEED)
 
 # Hyperparameters
-TOTAL_TIMESTEPS = 100000
+TOTAL_TIMESTEPS = 1000000
 LEARNING_RATE = 0.0005
 BATCH_SIZE = 64
 BUFFER_SIZE = 10000
@@ -22,7 +22,7 @@ GAMMA = 0.99  # Discount factor
 TAU = 0.005   # For soft update of target network
 EPSILON_START = 1.0
 EPSILON_END = 0.05
-EPSILON_DECAY = 50000
+EPSILON_DECAY = 700000
 TARGET_UPDATE_INTERVAL = 1000
 SAVE_INTERVAL = 5000
 EVALUATE_INTERVAL = 2000
@@ -131,7 +131,7 @@ def train_agents(resume_from=None, epsilon_start=None, train_mode="both"):
     # Initialize environment with drone configurations - no rendering during training
     env = LidarDroneBaseEnv(
         lidar_reach=4.0,
-        num_ray=6,
+        num_ray=20,
         flight_mode=7,
         drone_configs=drone_configs,
         render_simulation=False  # Disable rendering during training
@@ -139,7 +139,10 @@ def train_agents(resume_from=None, epsilon_start=None, train_mode="both"):
     
     # Reset to initialize agent list
     observations, _ = env.reset()
-    
+    # print(observations)
+    # print(env.observation_space(pursuer_agent_name) )
+    # print(env.action_space(pursuer_agent_name))
+
     # Get agent names from observations
     agent_names = list(observations.keys())
     
@@ -445,7 +448,7 @@ def evaluate_agents(pursuer, evader, agent_names, global_step, train_mode="both"
     # Create environment with rendering for evaluation
     eval_env = LidarDroneBaseEnv(
         lidar_reach=4.0,
-        num_ray=6,
+        num_ray=20,
         flight_mode=7,
         drone_configs=drone_configs,
         render_simulation=True  # Enable visualization during evaluation

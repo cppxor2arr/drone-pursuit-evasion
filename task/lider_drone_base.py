@@ -100,7 +100,7 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
             shape=(velocity_dim + target_position + self.num_ray,),
             dtype=np.float64,
         )
-        self.actions = Actions(4.0)
+        self.actions = Actions(7)# 1 10 5 3 7 
         self._action_space = spaces.Discrete(len(self.actions))
         
         # Store drone configurations

@@ -34,7 +34,7 @@ def load_models(pursuer_path, evader_path, device='cpu'):
     # Create environment to get observation and action spaces
     env = LidarDroneBaseEnv(
         lidar_reach=4.0, 
-        num_ray=6, 
+        num_ray=20, 
         flight_mode=7,
         drone_configs=drone_configs,
         render_simulation=False
@@ -205,7 +205,7 @@ def evaluate(pursuer, evader, agent_names, num_episodes=10, render=True, sleep_t
     # Create environment with drone configurations
     env = LidarDroneBaseEnv(
         lidar_reach=4.0, 
-        num_ray=6, 
+        num_ray=20, 
         flight_mode=7,
         drone_configs=drone_configs,
         render_simulation=render,  # 시각화 활성화
