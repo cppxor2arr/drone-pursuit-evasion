@@ -12,6 +12,9 @@ from enum import Enum
 class DroneRole(Enum):
     PURSUER = 0
     EVADER = 1
+    HOVER = 2
+    RANDOM = 3
+    GREEDY = 4
 
 
 class DroneConfig:
@@ -21,11 +24,17 @@ class DroneConfig:
         role: DroneRole,
         start_pos: np.ndarray = None,
         start_orn: np.ndarray = None,
+        action_length: float = 7.0,
+        is_training: bool = True,
+        resume_from: str = None,
         name: str = None
     ):
         self.role = role
         self.start_pos = start_pos  # 3D position [x, y, z]
         self.start_orn = start_orn  # 3D orientation [roll, pitch, yaw]
+        self.action_length = action_length  # Length of actions for this drone
+        self.is_training = is_training  # Whether this drone is being trained
+        self.resume_from = resume_from  # Path to model to resume from
         self.name = name  # Optional name (will be auto-assigned if None)
 
 
@@ -100,7 +109,7 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
             shape=(velocity_dim + target_position + self.num_ray,),
             dtype=np.float64,
         )
-        self.actions = Actions(7)# 1 10 5 3 7 
+        self.actions = Actions()# 1 10 5 3 7 # default ation length 1 
         self._action_space = spaces.Discrete(len(self.actions))
         
         # Store drone configurations
@@ -408,7 +417,34 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
             for k, v in actions.items():
                 agent_idx = self.agent_name_mapping[k]
                 x, y, z = self.compute_observation_by_id((agent_idx + 1) % NUM_AGENT)[-3:]
-                dxdydz = self.actions[v]
+                
+                # Handle different drone roles
+                agent_name = k
+                drone_role = self.agent_roles.get(agent_name, DroneRole.PURSUER)  # Default to PURSUER if no role
+                
+                # For HOVER role, don't move
+                if drone_role == DroneRole.HOVER:
+                    # Set target position as current position for hovering
+                    current_pos = self.aviary.state(agent_idx)[-1]
+                    current_yaw = 0.0  # Use default yaw
+                    next_pose = np.array([current_pos[0], current_pos[1], current_yaw, current_pos[2]])
+                    self.aviary.set_setpoint(agent_idx, next_pose)
+                    continue  # Skip the rest of the processing for hovering drones
+                    
+                # For RANDOM role, choose a random action
+                if drone_role == DroneRole.RANDOM:
+                    v = np.random.randint(0, len(self.actions))
+                
+                # Get action length for this drone from config if available
+                action_length = 1.0
+                if self.drone_configs is not None:
+                    for config in self.drone_configs:
+                        if config.role == drone_role:
+                            action_length = config.action_length
+                            break
+                            
+                # Scale actions based on action_length
+                dxdydz = self.actions[v] * action_length
 
                 next_x = x + dxdydz[0]
                 next_y = y + dxdydz[1]

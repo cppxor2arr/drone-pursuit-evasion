@@ -7,29 +7,45 @@ import datetime
 from task.lider_drone_base import LidarDroneBaseEnv, DroneRole, DroneConfig
 from RL.dqn_agent import DroneDQNAgent, QNetwork
 
-def load_models(pursuer_path, evader_path, device='cpu'):
-    """Load trained models from saved weights"""
+def load_models(model_paths, device='cpu'):
+    """
+    Load trained models from saved weights
     
+    Args:
+        model_paths (dict): Dictionary mapping DroneRoles to model paths
+        device (str): Device to load models on ('cpu' or 'cuda')
+    """
     # Check if model paths exist
-    if not os.path.exists(pursuer_path):
-        raise FileNotFoundError(f"Pursuer model not found at: {pursuer_path}\nTry using the --find-latest flag or specify the correct path.")
+    agents = {}
+    drone_configs = []
     
-    if not os.path.exists(evader_path):
-        raise FileNotFoundError(f"Evader model not found at: {evader_path}\nTry using the --find-latest flag or specify the correct path.")
+    for role, path in model_paths.items():
+        if path and not os.path.exists(path):
+            raise FileNotFoundError(f"{role.name} model not found at: {path}")
     
-    # Define drone configurations
-    drone_configs = [
-        DroneConfig(
-            role=DroneRole.PURSUER,
-            start_pos=np.array([1, 1, 1]),
-            start_orn=np.array([0, 0, 0])
-        ),
-        DroneConfig(
-            role=DroneRole.EVADER,
-            start_pos=np.array([-1, -1, 1]),
-            start_orn=np.array([0, 0, 0])
+    # Create basic drone configs based on roles
+    for i, (role, path) in enumerate(model_paths.items()):
+        # Skip roles without models
+        if path is None and role not in [DroneRole.HOVER, DroneRole.RANDOM]:
+            continue
+            
+        # Create a position based on role
+        if role == DroneRole.PURSUER:
+            pos = np.array([1, 1, 1])
+        elif role == DroneRole.EVADER:
+            pos = np.array([-1, -1, 1])
+        else:
+            pos = np.array([0, 0, 1])
+            
+        # Add to drone configurations
+        drone_configs.append(
+            DroneConfig(
+                role=role,
+                start_pos=pos,
+                start_orn=np.array([0, 0, 0]),
+                action_length=7.0  # Default action length
+            )
         )
-    ]
     
     # Create environment to get observation and action spaces
     env = LidarDroneBaseEnv(
@@ -43,48 +59,42 @@ def load_models(pursuer_path, evader_path, device='cpu'):
     # Reset environment to initialize agent list
     observations, _ = env.reset()
     
-    # Get agent names and identify pursuer and evader
+    # Get agent names and map to their roles
     agent_names = list(observations.keys())
-    pursuer_agent_name = None
-    evader_agent_name = None
+    agent_roles = {}
     
     for agent_name in agent_names:
-        if env.agent_roles[agent_name] == DroneRole.PURSUER:
-            pursuer_agent_name = agent_name
-        else:
-            evader_agent_name = agent_name
+        role = env.agent_roles[agent_name]
+        agent_roles[agent_name] = role
+        print(f"Agent {agent_name} has role: {role.name}")
     
-    print(f"Agent names: Pursuer = {pursuer_agent_name}, Evader = {evader_agent_name}")
+    # Create agents for each drone that needs one
+    for agent_name, role in agent_roles.items():
+        # Skip roles that don't need agents
+        if role in [DroneRole.HOVER, DroneRole.RANDOM]:
+            continue
+            
+        # Check if we have a model for this role
+        if role in model_paths and model_paths[role] is not None:
+            obs_space = env.observation_space(agent_name)
+            act_space = env.action_space(agent_name)
+            
+            # Create and load agent
+            agent = DroneDQNAgent(obs_space, act_space, device=device)
+            print(f"Loading {role.name} model from {model_paths[role]} for agent {agent_name}")
+            agent.load(model_paths[role])
+            agent.eval()  # Set to evaluation mode
+            
+            # Store agent by its name (unique ID)
+            agents[agent_name] = agent
     
-    # Get observation and action spaces
-    pursuer_obs_space = env.observation_space(pursuer_agent_name)
-    pursuer_act_space = env.action_space(pursuer_agent_name)
-    
-    evader_obs_space = env.observation_space(evader_agent_name)
-    evader_act_space = env.action_space(evader_agent_name)
-    
-    # Initialize agents
-    pursuer = DroneDQNAgent(pursuer_obs_space, pursuer_act_space, device=device)
-    evader = DroneDQNAgent(evader_obs_space, evader_act_space, device=device)
-    
-    # Load saved weights
-    print(f"Loading pursuer model from {pursuer_path}")
-    pursuer.q_net.load_state_dict(torch.load(pursuer_path, map_location=device))
-    
-    print(f"Loading evader model from {evader_path}")
-    evader.q_net.load_state_dict(torch.load(evader_path, map_location=device))
-    
-    # Set to evaluation mode
-    pursuer.q_net.eval()
-    evader.q_net.eval()
-    
-    return pursuer, evader, (pursuer_agent_name, evader_agent_name)
+    return agents, agent_roles, drone_configs
 
 def find_latest_models(base_dir="weights/pursuit_evade"):
     """Find the latest trained models in the weights directory"""
     if not os.path.exists(base_dir):
         print(f"Warning: Directory {base_dir} not found.")
-        return None, None
+        return {}
     
     # Check for models in timestamp subdirectories first
     timestamps = []
@@ -101,115 +111,90 @@ def find_latest_models(base_dir="weights/pursuit_evade"):
         latest_dir = os.path.join(base_dir, timestamps[0])
         print(f"Found latest model directory: {latest_dir}")
         
-        # Find best pursuer model
-        pursuer_models = [f for f in os.listdir(latest_dir) if f.startswith("pursuer_") and f.endswith(".pt")]
+        model_paths = {}
         
-        # Find best evader model
-        evader_models = [f for f in os.listdir(latest_dir) if f.startswith("evader_") and f.endswith(".pt")]
+        for role in [DroneRole.PURSUER, DroneRole.EVADER]:
+            role_name = role.name.lower()
+            
+            # Find models for this role
+            role_models = [f for f in os.listdir(latest_dir) 
+                          if f.startswith(f"{role_name}_") and f.endswith(".pt")]
+            
+            if not role_models:
+                print(f"No {role.name} models found in {latest_dir}")
+                continue
+                
+            # Prioritize models: best > final > highest step count
+            if f"{role_name}_best.pt" in role_models:
+                model_paths[role] = os.path.join(latest_dir, f"{role_name}_best.pt")
+            elif f"{role_name}_final.pt" in role_models:
+                model_paths[role] = os.path.join(latest_dir, f"{role_name}_final.pt")
+            else:
+                # Get highest step count
+                step_models = [m for m in role_models 
+                              if m != f"{role_name}_0.pt" 
+                              and not m.endswith("best.pt") 
+                              and not m.endswith("final.pt")]
+                
+                if step_models:
+                    # Sort by step number
+                    def get_step_number(filename):
+                        try:
+                            if '_' in filename and '.' in filename:
+                                return int(filename.split('_')[1].split('.')[0])
+                            return 0
+                        except (IndexError, ValueError):
+                            return 0
+                            
+                    step_models.sort(key=get_step_number, reverse=True)
+                    model_paths[role] = os.path.join(latest_dir, step_models[0])
+                elif f"{role_name}_0.pt" in role_models:
+                    model_paths[role] = os.path.join(latest_dir, f"{role_name}_0.pt")
         
-        if not pursuer_models or not evader_models:
-            print(f"Could not find both pursuer and evader models in {latest_dir}")
-        else:
-            # Prioritize final models, then highest step count
-            def get_best_model(models):
-                if "final.pt" in models:
-                    return "final.pt"
-                elif "best.pt" in models:
-                    return "best.pt"
-                
-                # Extract step numbers and find the highest
-                step_models = [m for m in models if m != "0.pt" and not m.endswith("best.pt") and not m.endswith("final.pt")]  # Exclude initial and special models
-                if not step_models:
-                    return "0.pt" if "0.pt" in models else models[0]  # Return initial if no others exist, or first model
-                
-                # Sort by step number
-                def get_step_number(filename):
-                    try:
-                        if '_' in filename and '.' in filename:
-                            return int(filename.split('_')[1].split('.')[0])
-                        return 0
-                    except (IndexError, ValueError):
-                        return 0
-                        
-                step_models.sort(key=get_step_number, reverse=True)
-                return step_models[0]
-            
-            # Get best models
-            best_pursuer = get_best_model(pursuer_models)
-            best_evader = get_best_model(evader_models)
-            
-            pursuer_model = os.path.join(latest_dir, best_pursuer)
-            evader_model = os.path.join(latest_dir, best_evader)
-            
-            print(f"Selected pursuer model: {pursuer_model}")
-            print(f"Selected evader model: {evader_model}")
-            
-            return pursuer_model, evader_model
+        if model_paths:
+            # Print found models
+            for role, path in model_paths.items():
+                print(f"Selected {role.name} model: {path}")
+            return model_paths
     
-    # If no models found in subdirectories, check root directory
+    # If no models found in timestamp directories, check root directory
     print("No models found in timestamp directories, checking root directory...")
+    model_paths = {}
     
-    # Look for models directly in the base directory
-    pursuer_models = [f for f in os.listdir(base_dir) if f.startswith("pursuer_") and f.endswith(".pt")]
-    evader_models = [f for f in os.listdir(base_dir) if f.startswith("evader_") and f.endswith(".pt")]
+    for role in [DroneRole.PURSUER, DroneRole.EVADER]:
+        role_name = role.name.lower()
+        role_models = [f for f in os.listdir(base_dir) 
+                      if f.startswith(f"{role_name}_") and f.endswith(".pt")]
+        
+        if role_models:
+            model_paths[role] = os.path.join(base_dir, role_models[0])
+            print(f"Selected {role.name} model: {model_paths[role]}")
     
-    if pursuer_models and evader_models:
-        print(f"Found models in root directory: {base_dir}")
-        
-        pursuer_model = os.path.join(base_dir, pursuer_models[0])
-        evader_model = os.path.join(base_dir, evader_models[0])
-        
-        print(f"Selected pursuer model: {pursuer_model}")
-        print(f"Selected evader model: {evader_model}")
-        
-        return pursuer_model, evader_model
+    if not model_paths:
+        print(f"No suitable models found in {base_dir}")
     
-    # No models found anywhere
-    print(f"No suitable models found in {base_dir}")
-    return None, None
+    return model_paths
 
-def evaluate(pursuer, evader, agent_names, num_episodes=10, render=True, sleep_time=0.01, swap_roles=False):
-    """Evaluate trained agents"""
+def evaluate(agents, agent_roles, drone_configs, num_episodes=10, render=True, sleep_time=0.01):
+    """
+    Evaluate trained agents
     
-    pursuer_agent_name, evader_agent_name = agent_names
-    
-    # Create drone configurations based on whether roles are swapped
-    if swap_roles:
-        print("Swapping pursuer and evader roles!")
-        drone_configs = [
-            DroneConfig(
-                role=DroneRole.EVADER,  # Swapped: first drone is evader
-                start_pos=np.array([1, 1, 1]),
-                start_orn=np.array([0, 0, 0])
-            ),
-            DroneConfig(
-                role=DroneRole.PURSUER,  # Swapped: second drone is pursuer
-                start_pos=np.array([-1, -1, 1]),
-                start_orn=np.array([0, 0, 0])
-            )
-        ]
-    else:
-        drone_configs = [
-            DroneConfig(
-                role=DroneRole.PURSUER,
-                start_pos=np.array([1, 1, 1]),
-                start_orn=np.array([0, 0, 0])
-            ),
-            DroneConfig(
-                role=DroneRole.EVADER,
-                start_pos=np.array([-1, -1, 1]),
-                start_orn=np.array([0, 0, 0])
-            )
-        ]
-    
+    Args:
+        agents (dict): Dictionary mapping agent names to agent instances
+        agent_roles (dict): Dictionary mapping agent names to their roles
+        drone_configs (list): List of DroneConfig objects
+        num_episodes (int): Number of episodes to evaluate
+        render (bool): Whether to render the environment
+        sleep_time (float): Time to sleep between steps
+    """
     # Create environment with drone configurations
     env = LidarDroneBaseEnv(
         lidar_reach=4.0, 
         num_ray=20, 
         flight_mode=7,
         drone_configs=drone_configs,
-        render_simulation=render,  # 시각화 활성화
-        render_mode="human" if render else None  # 렌더링 모드 설정
+        render_simulation=render,  # Enable visualization
+        render_mode="human" if render else None  # Set render mode
     )
     
     print(f"Simulation rendering is {'enabled' if render else 'disabled'}")
@@ -219,23 +204,15 @@ def evaluate(pursuer, evader, agent_names, num_episodes=10, render=True, sleep_t
     # Reset to initialize agent list
     obs, _ = env.reset()
     
-    # Get agent names in the evaluation environment based on their roles
-    eval_agent_names = list(obs.keys())
-    eval_pursuer_name = None
-    eval_evader_name = None
-    
-    for name in eval_agent_names:
-        if env.agent_roles[name] == DroneRole.PURSUER:
-            eval_pursuer_name = name
-        else:
-            eval_evader_name = name
-    
-    print(f"Evaluation environment agent roles: Pursuer = {eval_pursuer_name}, Evader = {eval_evader_name}")
+    # Get agent names
+    agent_names = list(obs.keys())
     
     # Track statistics
-    episode_rewards = {agent: [] for agent in agent_names}
+    episode_rewards = {agent: 0 for agent in agent_names}
     episode_lengths = []
     capture_count = 0
+    collision_count = 0
+    out_of_bounds_count = 0
     
     for episode in range(num_episodes):
         obs, _ = env.reset()
@@ -249,83 +226,116 @@ def evaluate(pursuer, evader, agent_names, num_episodes=10, render=True, sleep_t
                 
             actions = {}
             
-            # Get actions for each agent
-            for env_agent_name in list(obs.keys()):
-                agent_obs = obs[env_agent_name]
+            # Select actions for each agent based on its role
+            for agent_name in list(obs.keys()):
+                if agent_name not in obs:
+                    continue  # Skip agents without observations
+                    
+                agent_obs = obs[agent_name]
+                agent_role = env.agent_roles[agent_name]
                 
-                # Determine which agent should control this drone based on role
-                if env.agent_roles[env_agent_name] == DroneRole.PURSUER:
-                    agent = pursuer
-                    original_name = pursuer_agent_name
+                # Handle different roles
+                if agent_role == DroneRole.RANDOM:
+                    # Random action
+                    actions[agent_name] = env.action_space(agent_name).sample()
+                elif agent_role == DroneRole.HOVER:
+                    # No action needed for hovering (handled in environment)
+                    actions[agent_name] = 0  # Default action
+                elif agent_name in agents:
+                    # Use agent's policy
+                    agent = agents[agent_name]
+                    actions[agent_name] = int(agent.exploit(agent_obs)[0])
                 else:
-                    agent = evader
-                    original_name = evader_agent_name
-                
-                actions[env_agent_name] = int(agent.exploit(agent_obs)[0])
+                    # Default fallback
+                    actions[agent_name] = env.action_space(agent_name).sample()
+                    print(f"Warning: No agent for {agent_name} with role {agent_role.name}, using random action")
             
             # Step environment
-            obs, rewards, terminations, truncations, infos = env.step(actions)
+            next_obs, rewards, terminations, truncations, infos = env.step(actions)
             
-            # Update statistics - match environment agent to original agent based on role
-            for env_agent_name, reward in rewards.items():
-                if env.agent_roles[env_agent_name] == DroneRole.PURSUER:
-                    episode_reward[pursuer_agent_name] += reward
-                else:
-                    episode_reward[evader_agent_name] += reward
+            # Update statistics
+            for agent_name, reward in rewards.items():
+                episode_reward[agent_name] += reward
             
             step_count += 1
             
-            # Check for capture
-            capture_occurred = any(info.get("capture", False) for info in infos.values())
-            if capture_occurred:
-                capture_count += 1
-                if render:
-                    print(f"Capture occurred at step {step_count}!")
+            # Check for termination reasons
+            for agent_name, info in infos.items():
+                if info.get("capture", False):
+                    capture_count += 1
+                    if render:
+                        print(f"Capture occurred at step {step_count}!")
+                if info.get("collision", False):
+                    collision_count += 1
+                    if render:
+                        print(f"Collision occurred at step {step_count}!")
+                if info.get("out_of_bounds", False):
+                    out_of_bounds_count += 1
+                    if render:
+                        print(f"Out of bounds at step {step_count}!")
             
             # Check for episode termination
             done = all(terminations.values()) or all(truncations.values())
+            
+            # Update observation
+            obs = next_obs
         
         # Store episode statistics
         for agent_name in agent_names:
-            episode_rewards[agent_name].append(episode_reward[agent_name])
+            episode_rewards[agent_name] += episode_reward[agent_name]
         episode_lengths.append(step_count)
         
-        print(f"Episode {episode+1}/{num_episodes}: " +
-              f"Pursuer Reward={episode_reward[pursuer_agent_name]:.2f}, " +
-              f"Evader Reward={episode_reward[evader_agent_name]:.2f}, " +
-              f"Length={step_count}")
+        # Print episode results
+        print(f"Episode {episode+1}/{num_episodes}: Length={step_count}")
+        for agent_name in agent_names:
+            role = env.agent_roles[agent_name]
+            print(f"  {agent_name} ({role.name}) Reward: {episode_reward[agent_name]:.2f}")
     
     # Compute average statistics
-    avg_rewards = {agent: np.mean(rewards) for agent, rewards in episode_rewards.items()}
-    avg_length = np.mean(episode_lengths)
+    avg_rewards = {agent: episode_rewards[agent] / num_episodes for agent in agent_names}
+    avg_length = sum(episode_lengths) / num_episodes
     capture_rate = capture_count / num_episodes
+    collision_rate = collision_count / num_episodes
+    out_of_bounds_rate = out_of_bounds_count / num_episodes
     
     print("\nEvaluation Results:")
-    print(f"Average Pursuer Reward: {avg_rewards[pursuer_agent_name]:.2f}")
-    print(f"Average Evader Reward: {avg_rewards[evader_agent_name]:.2f}")
     print(f"Average Episode Length: {avg_length:.2f}")
     print(f"Capture Rate: {capture_rate:.2f} ({capture_count}/{num_episodes})")
+    print(f"Collision Rate: {collision_rate:.2f} ({collision_count}/{num_episodes})")
+    print(f"Out of Bounds Rate: {out_of_bounds_rate:.2f} ({out_of_bounds_count}/{num_episodes})")
+    
+    for agent_name in agent_names:
+        role = env.agent_roles[agent_name]
+        print(f"Average {agent_name} ({role.name}) Reward: {avg_rewards[agent_name]:.2f}")
     
     return {
         "avg_rewards": avg_rewards,
         "avg_length": avg_length,
-        "capture_rate": capture_rate
+        "capture_rate": capture_rate,
+        "collision_rate": collision_rate,
+        "out_of_bounds_rate": out_of_bounds_rate
     }
 
 def main():
     parser = argparse.ArgumentParser(description="Evaluate trained DQN agents for drone pursuit-evasion")
-    parser.add_argument("--pursuer", type=str, default="weights/pursuit_evade/pursuer_final.pt",
+    parser.add_argument("--pursuer", type=str, default=None,
                         help="Path to the pursuer model weights")
-    parser.add_argument("--evader", type=str, default="weights/pursuit_evade/evader_final.pt",
+    parser.add_argument("--evader", type=str, default=None,
                         help="Path to the evader model weights")
+    parser.add_argument("--pursuer-role", type=str, default='pursuer',
+                        help="Role for the first drone (pursuer, evader, hover, random)")
+    parser.add_argument("--evader-role", type=str, default='evader',
+                        help="Role for the second drone (pursuer, evader, hover, random)")
+    parser.add_argument("--pursuer-action-length", type=float, default=7.0,
+                        help="Action length for the pursuer")
+    parser.add_argument("--evader-action-length", type=float, default=7.0,
+                        help="Action length for the evader")
     parser.add_argument("--episodes", type=int, default=5,
                         help="Number of episodes to evaluate")
     parser.add_argument("--no-render", action="store_true",
                         help="Disable rendering (headless mode)")
     parser.add_argument("--sleep", type=float, default=0.05,
                         help="Sleep time between steps for visualization (set to 0 for fastest evaluation)")
-    parser.add_argument("--swap-roles", action="store_true",
-                        help="Swap the pursuer and evader roles for evaluation")
     parser.add_argument("--find-latest", action="store_true",
                         help="Automatically find and use the latest saved models")
     
@@ -339,31 +349,61 @@ def main():
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     print(f"Evaluation started at: {timestamp}")
     
-    # Find the latest models if requested
-    if args.find_latest:
-        pursuer_path, evader_path = find_latest_models()
-        if pursuer_path is None or evader_path is None:
-            print("Could not find latest models. Please specify model paths manually.")
-            return
-        args.pursuer = pursuer_path
-        args.evader = evader_path
+    # Parse roles using DroneRole enum directly
+    role_map = {
+        'pursuer': DroneRole.PURSUER,
+        'evader': DroneRole.EVADER,
+        'hover': DroneRole.HOVER,
+        'random': DroneRole.RANDOM
+    }
     
-    model_info = os.path.basename(os.path.dirname(args.pursuer))
-    print(f"Evaluating model: {model_info}")
+    pursuer_role = role_map.get(args.pursuer_role.lower(), DroneRole.PURSUER)
+    evader_role = role_map.get(args.evader_role.lower(), DroneRole.EVADER)
+    
+    # Find latest models if requested, or use provided paths
+    if args.find_latest:
+        model_paths = find_latest_models()
+    else:
+        model_paths = {}
+        if args.pursuer and pursuer_role not in [DroneRole.HOVER, DroneRole.RANDOM]:
+            model_paths[pursuer_role] = args.pursuer
+        if args.evader and evader_role not in [DroneRole.HOVER, DroneRole.RANDOM]:
+            model_paths[evader_role] = args.evader
+    
+    if not model_paths and all(role in [DroneRole.HOVER, DroneRole.RANDOM] for role in [pursuer_role, evader_role]):
+        print("Note: No models needed as both drones are set to HOVER or RANDOM roles")
+    elif not model_paths:
+        print("Error: No models specified. Use --pursuer and --evader arguments or --find-latest")
+        return
     
     try:
         # Load models
-        pursuer, evader, agent_names = load_models(args.pursuer, args.evader, device)
+        agents, agent_roles, _ = load_models(model_paths, device)
+        
+        # Create drone configurations
+        drone_configs = [
+            DroneConfig(
+                role=pursuer_role,
+                start_pos=np.array([1, 1, 1]),
+                start_orn=np.array([0, 0, 0]),
+                action_length=args.pursuer_action_length
+            ),
+            DroneConfig(
+                role=evader_role,
+                start_pos=np.array([-1, -1, 1]),
+                start_orn=np.array([0, 0, 0]),
+                action_length=args.evader_action_length
+            )
+        ]
         
         # Evaluate
         evaluate(
-            pursuer, 
-            evader, 
-            agent_names=agent_names, 
+            agents, 
+            agent_roles,
+            drone_configs=drone_configs,
             num_episodes=args.episodes,
             render=not args.no_render,
-            sleep_time=args.sleep,
-            swap_roles=args.swap_roles
+            sleep_time=args.sleep
         )
     except FileNotFoundError as e:
         print(f"Error: {e}")
