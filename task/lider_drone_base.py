@@ -524,6 +524,16 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
                 basePosition=[0.0, 0.0, 0.0],
                 useMaximalCoordinates=True,
             )
+            obs_radius = 0.5
+            obs_height = 7.0
+            obstacles = [[2*i,2*j] for i in range(-3, 3) for j in range(-3, 3)]
+            for obs_loc in obstacles:
+                obsCollisionId = self.aviary.createCollisionShape(shapeType=p.GEOM_CYLINDER, radius=obs_radius, height=obs_height)
+                obsId = self.aviary.createMultiBody(
+                baseMass=0.0,
+                baseCollisionShapeIndex=obsCollisionId,
+                basePosition=obs_loc + [obs_height / 2.0],
+                )
             self.aviary.register_all_new_bodies()
 
             NUM_AGENT = 2
