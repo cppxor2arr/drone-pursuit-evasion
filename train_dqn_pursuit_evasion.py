@@ -14,7 +14,7 @@ torch.manual_seed(RANDOM_SEED)
 random.seed(RANDOM_SEED)
 
 # Hyperparameters
-TOTAL_TIMESTEPS = 1000000
+TOTAL_TIMESTEPS = 10000000
 LEARNING_RATE = 0.0005
 BATCH_SIZE = 64
 BUFFER_SIZE = 10000
@@ -22,18 +22,12 @@ GAMMA = 0.99  # Discount factor
 TAU = 0.005   # For soft update of target network
 EPSILON_START = 1.0
 EPSILON_END = 0.05
-EPSILON_DECAY = 700000
+EPSILON_DECAY = 7000000
 TARGET_UPDATE_INTERVAL = 1000
 SAVE_INTERVAL = 5000
 EVALUATE_INTERVAL = 2000
 
 def train_agents(drone_configs):
-    """
-    Train DQN agents for pursuit-evasion based on drone configurations
-    
-    Args:
-        drone_configs (list): List of DroneConfig objects
-    """
     # Get current time for wandb run name
     current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     
@@ -128,60 +122,63 @@ def train_agents(drone_configs):
     for agent_name, role in agent_roles.items():
         print(f"Agent {agent_name} assigned role: {role.name}")
     
+    # Create agent_name to config mapping
+    agent2config = {}
+    for i, agent_name in enumerate(agent_names):
+        if i < len(drone_configs):
+            agent2config[agent_name] = drone_configs[i]
+    
     # Create dictionary of agents by agent name
-    agents = {}
-    buffers = {}
+    agent2DNN = {}
+    agent2buffer = {}
     
     # Initialize agents for each role that exists in the environment
     for agent_name, role in agent_roles.items():
+        # Skip agent creation for HOVER and RANDOM roles
+        if role in [DroneRole.HOVER, DroneRole.RANDOM]:
+            continue
+            
         obs_space = env.observation_space(agent_name)
         act_space = env.action_space(agent_name)
         
-        # Get the corresponding drone config
-        drone_config = next((config for config in drone_configs if config.role == role), None)
+        drone_config = agent2config.get(agent_name)
+        # Initialize the agent
+        agent = DroneDQNAgent(
+            observation_space=obs_space, 
+            action_space=act_space, 
+            device=device,
+            gamma=GAMMA,
+            epsilon_start=local_epsilon_start,
+            epsilon_end=local_epsilon_end,
+            epsilon_decay=local_epsilon_decay,
+            learning_rate=LEARNING_RATE
+        )
         
-        if drone_config:
-            # Skip agent creation for HOVER and RANDOM roles
-            if role in [DroneRole.HOVER, DroneRole.RANDOM]:
-                continue
-                
-            # Create agent with appropriate parameters
-            agent = DroneDQNAgent(
-                observation_space=obs_space, 
-                action_space=act_space, 
-                device=device,
-                gamma=GAMMA,
-                epsilon_start=local_epsilon_start,
-                epsilon_end=local_epsilon_end,
-                epsilon_decay=local_epsilon_decay,
-                learning_rate=LEARNING_RATE
-            )
+        # Load model if resuming
+        if drone_config.resume_from and os.path.exists(drone_config.resume_from):
+            print(f"Loading {role.name} model from {drone_config.resume_from} for agent {agent_name}")
+            agent.load(drone_config.resume_from)
+        
+        # Set to train mode if this drone is being trained
+        if drone_config.is_training:
+            agent.train()
+            print(f"Agent {agent_name} ({role.name}) set to training mode")
+        else:
+            agent.eval()
+            print(f"Agent {agent_name} ({role.name}) set to evaluation mode")
+        
+        # Create replay buffer
+        if drone_config.is_training:
+            buffer = agent.create_buffer(BUFFER_SIZE)
             
-            # Load model if resuming
-            if drone_config.resume_from and os.path.exists(drone_config.resume_from):
-                print(f"Loading {role.name} model from {drone_config.resume_from} for agent {agent_name}")
-                agent.load(drone_config.resume_from)
+            # Store agent and buffer by agent name
+            agent2DNN[agent_name] = agent
+            agent2buffer[agent_name] = buffer
             
-            # Set to train mode if this drone is being trained
-            if drone_config.is_training:
-                agent.train()
-                print(f"Agent {agent_name} ({role.name}) set to training mode")
-            else:
-                agent.eval()
-                print(f"Agent {agent_name} ({role.name}) set to evaluation mode")
-            
-            # Create replay buffer
-            if drone_config.is_training:
-                buffer = agent.create_buffer(BUFFER_SIZE)
-                
-                # Store agent and buffer by agent name
-                agents[agent_name] = agent
-                buffers[agent_name] = buffer
-                
-                # Save initial model if not resuming
-                if not drone_config.resume_from:
-                    agent.save(path=f"{weights_dir}/{role.name.lower()}", step=0)
-                    print(f"Saved initial model for agent {agent_name} ({role.name}) at step 0")
+            # Save initial model if not resuming
+            if not drone_config.resume_from:
+                agent.save(path=f"{weights_dir}/{role.name.lower()}", step=0)
+                print(f"Saved initial model for agent {agent_name} ({role.name}) at step 0")
     
     # Training loop
     obs = observations.copy()
@@ -206,19 +203,19 @@ def train_agents(drone_configs):
             elif agent_role == DroneRole.HOVER:
                 # No action needed for hovering (handled in environment)
                 actions[agent_name] = 0  # Default action
-            elif agent_name in agents:
-                agent = agents[agent_name]
-                drone_config = next((config for config in drone_configs if config.role == agent_role), None)
+            elif agent_name in agent2DNN:
+                agent = agent2DNN[agent_name]
+                drone_config = agent2config.get(agent_name)
                 
-                if drone_config and drone_config.is_training:
+                if drone_config.is_training:
                     # Training mode: use epsilon-greedy policy
                     actions[agent_name] = agent.select_action(agent_obs)
                 else:
                     # Evaluation mode: use greedy policy
                     actions[agent_name] = int(agent.exploit(agent_obs)[0])
-            else:
-                # Default fallback
-                actions[agent_name] = env.action_space(agent_name).sample()
+            # else:  TODO GREEDY ACTION
+            #     # Default fallback
+            #     actions[agent_name] = env.action_space(agent_name).sample()
         
         # Perform action in environment
         next_obs, rewards, terminations, truncations, infos = env.step(actions)
@@ -244,22 +241,19 @@ def train_agents(drone_configs):
         if len(next_obs) == len(obs):  # Make sure we have observations for all agents
             for agent_name in agent_names:
                 if agent_name in obs and agent_name in next_obs:
-                    # Get agent role
-                    agent_role = env.agent_roles[agent_name]
-                    
                     # Track episode stats
                     episode_rewards[agent_name] += rewards[agent_name]
                     episode_lengths[agent_name] += 1
                     
                     # Only update buffer if this role is being trained
-                    if agent_name in agents and agent_name in buffers:
-                        drone_config = next((config for config in drone_configs if config.role == agent_role), None)
+                    if agent_name in agent2DNN and agent_name in agent2buffer:
+                        drone_config = agent2config.get(agent_name)
                         
-                        if drone_config and drone_config.is_training:
+                        if drone_config.is_training:
                             done = terminations[agent_name] or truncations[agent_name]
                             
                             # Add experience to buffer
-                            buffers[agent_name].add(
+                            agent2buffer[agent_name].add(
                                 obs[agent_name],
                                 actions[agent_name],
                                 rewards[agent_name],
@@ -269,14 +263,14 @@ def train_agents(drone_configs):
         
         # Train agents if enough samples are collected
         if global_step > BATCH_SIZE:
-            for agent_name, agent in agents.items():
-                if agent_name in buffers:
-                    buffer = buffers[agent_name]
+            for agent_name, agent in agent2DNN.items():
+                if agent_name in agent2buffer:
+                    buffer = agent2buffer[agent_name]
                     
                     # Check if this role is being trained
-                    drone_config = next((config for config in drone_configs if config.role == env.agent_roles[agent_name]), None)
+                    drone_config = agent2config.get(agent_name)
                     
-                    if drone_config and drone_config.is_training and len(buffer) > BATCH_SIZE:
+                    if drone_config.is_training and len(buffer) > BATCH_SIZE:
                         # Sample batch and update network
                         batch = buffer.sample(BATCH_SIZE)
                         loss = agent.update(batch)
@@ -293,19 +287,19 @@ def train_agents(drone_configs):
         
         # Periodically update target networks for training agents
         if global_step % TARGET_UPDATE_INTERVAL == 0:
-            for agent_name, agent in agents.items():
-                drone_config = next((config for config in drone_configs if config.role == env.agent_roles[agent_name]), None)
+            for agent_name, agent in agent2DNN.items():
+                drone_config = agent2config.get(agent_name)
                 
-                if drone_config and drone_config.is_training:
+                if drone_config.is_training:
                     agent.update_target_network()
             print(f"Updated target networks at step {global_step}")
         
         # Save models periodically
         if global_step > 0 and global_step % SAVE_INTERVAL == 0:
-            for agent_name, agent in agents.items():
-                drone_config = next((config for config in drone_configs if config.role == env.agent_roles[agent_name]), None)
+            for agent_name, agent in agent2DNN.items():
+                drone_config = agent2config.get(agent_name)
                 
-                if drone_config and drone_config.is_training:
+                if drone_config.is_training:
                     agent.save(path=f"{weights_dir}/{env.agent_roles[agent_name].name.lower()}", step=global_step)
             print(f"Saved checkpoint models at step {global_step}")
         
@@ -341,10 +335,10 @@ def train_agents(drone_configs):
             
         # Evaluate periodically
         if global_step % EVALUATE_INTERVAL == 0:
-            eval_results = evaluate_agents(agents, agent_roles, global_step, drone_configs)
+            eval_results = evaluate_agents(agent2DNN, agent_roles, global_step, drone_configs, agent2config)
             
             # Check if this is the best model for each agent
-            for agent_name, agent in agents.items():
+            for agent_name, agent in agent2DNN.items():
                 if agent_name in eval_results['avg_rewards']:
                     # Get current role of this agent
                     role = env.agent_roles[agent_name]
@@ -363,7 +357,7 @@ def train_agents(drone_configs):
                         print(f"New best model for agent {agent_name} ({role.name}) at step {global_step} with reward {eval_results['avg_rewards'][agent_name]:.2f}")
     
     # Save final models
-    for agent_name, agent in agents.items():
+    for agent_name, agent in agent2DNN.items():
         agent.save(path=f"{weights_dir}/{env.agent_roles[agent_name].name.lower()}")
     
     # Save information about best models
@@ -381,7 +375,7 @@ def train_agents(drone_configs):
     # Finalize wandb
     wandb.finish()
 
-def evaluate_agents(agents, agent_roles, global_step, drone_configs, num_episodes=3):
+def evaluate_agents(agent2DNN, agent_roles, global_step, drone_configs, agent2config, num_episodes=3):
     """Evaluate the performance of trained agents"""
     print(f"Evaluating agents at step {global_step}...")
     
@@ -399,7 +393,7 @@ def evaluate_agents(agents, agent_roles, global_step, drone_configs, num_episode
     
     # Keep track of original training modes and switch to eval mode
     original_modes = {}
-    for agent_name, agent in agents.items():
+    for agent_name, agent in agent2DNN.items():
         original_modes[agent_name] = agent.q_net.training
         agent.eval()
     
@@ -410,6 +404,12 @@ def evaluate_agents(agents, agent_roles, global_step, drone_configs, num_episode
     eval_agent_roles = {}
     for agent_name in eval_agent_names:
         eval_agent_roles[agent_name] = eval_env.agent_roles[agent_name]
+    
+    # Create config mapping for eval agents
+    eval_agent2config = {}
+    for i, agent_name in enumerate(eval_agent_names):
+        if i < len(drone_configs):
+            eval_agent2config[agent_name] = drone_configs[i]
     
     # Prepare tracking variables
     avg_rewards = {agent: 0 for agent in eval_agent_names}
@@ -442,17 +442,17 @@ def evaluate_agents(agents, agent_roles, global_step, drone_configs, num_episode
                 elif agent_role == DroneRole.HOVER:
                     # No action needed for hovering (handled in environment)
                     actions[agent_name] = 0  # Default action
-                elif agent_name in agents:
+                elif agent_name in agent2DNN:
                     # Use agent's policy if we have a matching agent
-                    agent = agents[agent_name]
+                    agent = agent2DNN[agent_name]
                     actions[agent_name] = int(agent.exploit(agent_obs)[0])
                 else:
                     # Try to find a matching agent by role
                     matching_agents = [name for name, role in agent_roles.items() 
-                                    if role == agent_role and name in agents]
+                                    if role == agent_role and name in agent2DNN]
                     if matching_agents:
                         # Use the first agent with the matching role
-                        agent = agents[matching_agents[0]]
+                        agent = agent2DNN[matching_agents[0]]
                         actions[agent_name] = int(agent.exploit(agent_obs)[0])
                     else:
                         # Default to random action
@@ -512,7 +512,7 @@ def evaluate_agents(agents, agent_roles, global_step, drone_configs, num_episode
         print(f"Avg {agent_name} ({role.name}) Reward: {avg_rewards[agent_name]:.2f}")
     
     # Restore original training modes
-    for agent_name, agent in agents.items():
+    for agent_name, agent in agent2DNN.items():
         if original_modes[agent_name]:
             agent.train()
     
@@ -523,10 +523,11 @@ def evaluate_agents(agents, agent_roles, global_step, drone_configs, num_episode
     }
 
 if __name__ == "__main__":
-    # Define drone configurations
+    # Define drone configurations - add explicit names for easier identification
     drone_configs = [
         DroneConfig(
             role=DroneRole.PURSUER,
+            name="pursuer_drone",
             start_pos=np.array([1, 1, 1]),
             start_orn=np.array([0, 0, 0]),
             action_length=7.0,
@@ -535,6 +536,7 @@ if __name__ == "__main__":
         ),
         DroneConfig(
             role=DroneRole.EVADER,
+            name="evader_drone",
             start_pos=np.array([-1, -1, 1]),
             start_orn=np.array([0, 0, 0]),
             action_length=7.0,
@@ -542,60 +544,4 @@ if __name__ == "__main__":
             resume_from=None   # Start from scratch
         )
     ]
-    
-    # Example usage for different training scenarios:
-    
-    # # Train only pursuer against random evader
-    # drone_configs = [
-    #     DroneConfig(
-    #         role=DroneRole.PURSUER,
-    #         start_pos=np.array([1, 1, 1]),
-    #         start_orn=np.array([0, 0, 0]),
-    #         action_length=7.0,
-    #         is_training=True
-    #     ),
-    #     DroneConfig(
-    #         role=DroneRole.RANDOM,
-    #         start_pos=np.array([-1, -1, 1]),
-    #         start_orn=np.array([0, 0, 0]),
-    #         action_length=5.0
-    #     )
-    # ]
-    
-    # # Train only evader against hovering pursuer
-    # drone_configs = [
-    #     DroneConfig(
-    #         role=DroneRole.HOVER,
-    #         start_pos=np.array([1, 1, 1]),
-    #         start_orn=np.array([0, 0, 0])
-    #     ),
-    #     DroneConfig(
-    #         role=DroneRole.EVADER,
-    #         start_pos=np.array([-1, -1, 1]),
-    #         start_orn=np.array([0, 0, 0]),
-    #         action_length=7.0,
-    #         is_training=True
-    #     )
-    # ]
-    
-    # # Resume training from saved models
-    # drone_configs = [
-    #     DroneConfig(
-    #         role=DroneRole.PURSUER,
-    #         start_pos=np.array([1, 1, 1]),
-    #         start_orn=np.array([0, 0, 0]),
-    #         action_length=7.0,
-    #         is_training=True,
-    #         resume_from="weights/pursuit_evade/20230615_123456/pursuer_best.pt"
-    #     ),
-    #     DroneConfig(
-    #         role=DroneRole.EVADER,
-    #         start_pos=np.array([-1, -1, 1]),
-    #         start_orn=np.array([0, 0, 0]),
-    #         action_length=7.0,
-    #         is_training=True,
-    #         resume_from="weights/pursuit_evade/20230615_123456/evader_best.pt"
-    #     )
-    # ]
-    
     train_agents(drone_configs) 

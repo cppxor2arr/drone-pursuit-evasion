@@ -299,16 +299,12 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
         self.agent_roles = {}
         
         # If we have drone configs, use them to assign roles
-        if self.drone_configs is not None:
-            for i, config in enumerate(self.drone_configs):
-                if i < len(self.agents):
-                    agent_name = self.agents[i]
-                    self.agent_roles[agent_name] = config.role
-            return
+        for i, config in enumerate(self.drone_configs):
+            if i < len(self.agents):
+                agent_name = self.agents[i]
+                self.agent_roles[agent_name] = config.role
+
         
-        # Default assignment: first agent is pursuer, others are evaders
-        for i, agent_name in enumerate(self.agents):
-            self.agent_roles[agent_name] = DroneRole.PURSUER if i == 0 else DroneRole.EVADER
 
     def compute_term_trunc_reward_info_by_id(
         self, agent_id: int, prev_observations: dict[str, Any]
