@@ -214,8 +214,7 @@ def train_agents(drone_configs):
                     # Evaluation mode: use greedy policy
                     actions[agent_name] = int(agent.exploit(agent_obs)[0])
             # else:  TODO GREEDY ACTION
-            #     # Default fallback
-            #     actions[agent_name] = env.action_space(agent_name).sample()
+
         
         # Perform action in environment
         next_obs, rewards, terminations, truncations, infos = env.step(actions)
@@ -446,18 +445,7 @@ def evaluate_agents(agent2DNN, agent_roles, global_step, drone_configs, agent2co
                     # Use agent's policy if we have a matching agent
                     agent = agent2DNN[agent_name]
                     actions[agent_name] = int(agent.exploit(agent_obs)[0])
-                else:
-                    # Try to find a matching agent by role
-                    matching_agents = [name for name, role in agent_roles.items() 
-                                    if role == agent_role and name in agent2DNN]
-                    if matching_agents:
-                        # Use the first agent with the matching role
-                        agent = agent2DNN[matching_agents[0]]
-                        actions[agent_name] = int(agent.exploit(agent_obs)[0])
-                    else:
-                        # Default to random action
-                        actions[agent_name] = eval_env.action_space(agent_name).sample()
-            
+                            
             # Step environment
             next_obs, rewards, terminations, truncations, infos = eval_env.step(actions)
             
@@ -524,24 +512,5 @@ def evaluate_agents(agent2DNN, agent_roles, global_step, drone_configs, agent2co
 
 if __name__ == "__main__":
     # Define drone configurations - add explicit names for easier identification
-    drone_configs = [
-        DroneConfig(
-            role=DroneRole.PURSUER,
-            name="pursuer_drone",
-            start_pos=np.array([1, 1, 1]),
-            start_orn=np.array([0, 0, 0]),
-            action_length=7.0,
-            is_training=True,  # Train the pursuer
-            resume_from=None   # Start from scratch
-        ),
-        DroneConfig(
-            role=DroneRole.EVADER,
-            name="evader_drone",
-            start_pos=np.array([-1, -1, 1]),
-            start_orn=np.array([0, 0, 0]),
-            action_length=7.0,
-            is_training=True,  # Train the evader
-            resume_from=None   # Start from scratch
-        )
-    ]
+    from DRONECONFIG import drone_configs
     train_agents(drone_configs) 
