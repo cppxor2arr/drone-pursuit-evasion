@@ -232,7 +232,8 @@ def run_visualization(config: DictConfig):
     env = LidarDroneBaseEnv(
         env_config=env_config,
         scenario_config=config.scenario,
-        drone_configs=create_drone_configs(config.scenario)
+        drone_configs=create_drone_configs(config.scenario),
+        render_mode="human",
     )
     
     # Initialize environment

@@ -259,11 +259,11 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
             for d_theta in range(self.num_ray)
         ]
 
-        # Visualize rays if simulation is rendered
-        if self.render_simulation:
-            line_color = [0, 1, 0]
-            for i in range(self.num_ray):
-                p.addUserDebugLine(ray_from[i], ray_to[i], line_color, lifeTime=0.1)
+        # # Visualize rays if simulation is rendered
+        # if self.render_simulation:
+        #     line_color = [0, 1, 0]
+        #     for i in range(self.num_ray):
+        #         p.addUserDebugLine(ray_from[i], ray_to[i], line_color, lifeTime=0.1)
 
         NUM_THREAD = 1
         try:
