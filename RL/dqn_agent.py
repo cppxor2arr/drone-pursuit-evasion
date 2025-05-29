@@ -1,244 +1,199 @@
 import torch
 import torch.nn as nn
-
 import numpy as np
-from pettingzoo import ParallelEnv
-from stable_baselines3.common.type_aliases import ReplayBufferSamples
-from gymnasium.spaces import Discrete,Box
-from enum import Enum
 import random
 import os
 import math
-from collections import deque
-from datetime import datetime
+from typing import Dict, Union, Any
+from gymnasium.spaces import Discrete, Box
+from omegaconf import DictConfig
 
-class QNetwork(nn.Module):
-    def __init__(self, num_obs:int, num_action:int):
-        super().__init__()
-        self.network = nn.Sequential(
-            nn.Linear(num_obs, 120),
-            nn.ReLU(),
-            nn.Linear(120, 84),
-            nn.ReLU(),
-            nn.Linear(84, 84),
-            nn.ReLU(),
-            nn.Linear(84, num_action),
-            nn.Softmax(dim=1)
-        )
+from .base_agent import BaseRLAgent
+from .networks import QNetwork
+from .replay_buffer import ReplayBuffer
 
-    def forward(self, x):
-        return self.network(x)
 
-class ReplayBuffer:
-    def __init__(self, limit, device: str = "cpu"):
-        self.buffer = deque(maxlen=limit)
-        self.device = device
-
-    def add(self, *transition):
-        self.buffer.append(transition)
-
-    def sample(self, batch_size):
-        batch = random.sample(self.buffer, batch_size)
-        s, a, r, s_prime, done = zip(*batch)
+class DroneDQNAgent(BaseRLAgent):
+    """DQN Agent for drone control with clean API"""
+    
+    def __init__(self, observation_space: Box, action_space: Discrete, 
+                 config: DictConfig, device: str = "cpu"):
+        super().__init__(observation_space, action_space, device)
         
-        # Convert lists to numpy arrays then to tensors and move to device
-        return (
-            torch.from_numpy(np.array(s)).float().to(self.device),
-            torch.from_numpy(np.array(a)).long().to(self.device),
-            torch.from_numpy(np.array(r)).float().to(self.device),
-            torch.from_numpy(np.array(s_prime)).float().to(self.device),
-            torch.from_numpy(np.array(done)).float().to(self.device)
-        )
-
-    def __len__(self):
-        return len(self.buffer)
-
-    def to(self, device: str) -> None:
-        """Move buffer to specified device"""
-        self.device = device
-
-# batch로 input이 들어오면 batch로 대응할 수 있는가? 
-# supersuit에 vframe으로 모았을 때, 아니면 bootstrapping한 sample을 여러개 batch로 돌릴때,
-# input observation:
-class DroneDQNAgent():
-    def __init__(
-        self, 
-        observation_space: Box, 
-        action_space: Discrete, 
-        device: str,
-        gamma: float = 0.99,
-        epsilon_start: float = 1.0,
-        epsilon_end: float = 0.05,
-        epsilon_decay: int = 50000,
-        learning_rate: float = 0.0005
-    ):
-        # 환경 공간 저장
-        self.observation_space = observation_space
-        self.action_space = action_space
-        self.device = device
+        # Store config
+        self.config = config
         
-        # 하이퍼파라미터
-        self.gamma = gamma
-        self.epsilon_start = epsilon_start
-        self.epsilon_end = epsilon_end
-        self.epsilon_decay = epsilon_decay
-        self.learning_rate = learning_rate
+        # Extract hyperparameters from config
+        self.gamma = config.gamma
+        self.learning_rate = config.learning_rate
+        self._epsilon_start = config.epsilon_start
+        self._epsilon_end = config.epsilon_end
+        self._epsilon_decay = config.epsilon_decay
+        self.batch_size = config.batch_size
+        self.warmup_steps = getattr(config, 'warmup_steps', 1000)
+        self.target_update_interval = getattr(config, 'target_update_interval', 1000)
         
-        # 현재 스텝 및 엡실론 값
-        self.steps_done = 0
-        self.epsilon = epsilon_start
+        # Internal state
+        self._epsilon = self._epsilon_start
         
-        # 네트워크 초기화
-        num_obs = np.prod(observation_space.shape)
-        num_action = action_space.n
-        self.q_net = QNetwork(num_obs, num_action).to(device)  # Move to device immediately
-        self.target_network = QNetwork(num_obs, num_action).to(device)  # Move to device immediately
-        self.update_target_network()
+        # Network dimensions
+        obs_dim = np.prod(observation_space.shape)
+        action_dim = action_space.n
         
-        # 옵티마이저 초기화
-        self.optimizer = torch.optim.Adam(self.q_net.parameters(), lr=learning_rate)
+        # Initialize networks
+        self.q_net = QNetwork(obs_dim, action_dim, config.network.hidden_dims).to(device)
+        self.target_net = QNetwork(obs_dim, action_dim, config.network.hidden_dims).to(device)
+        self._update_target_network()
         
-        # 손실 함수
+        # Optimizer and loss function
+        self.optimizer = torch.optim.Adam(self.q_net.parameters(), lr=self.learning_rate)
         self.criterion = nn.MSELoss()
-
-    def to(self, device: str) -> None:
-        """모델을 지정된 디바이스로 이동"""
-        self.device = device
-        self.target_network.to(device)
-        self.q_net.to(device)
-
-    def update_target_network(self) -> None:
-        """타겟 네트워크 업데이트"""
-        self.target_network.load_state_dict(self.q_net.state_dict())
-    
-    def soft_update_target_network(self, tau: float = 0.005) -> None:
-        """타겟 네트워크 소프트 업데이트"""
-        for target_param, param in zip(self.target_network.parameters(), self.q_net.parameters()):
-            target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
-    
-    def get_epsilon(self) -> float:
-        """현재 엡실론 값 반환"""
-        return self.epsilon
-    
-    def update_epsilon(self) -> None:
-        """엡실론 값 업데이트 (선형 감소)"""
-        self.steps_done += 1
-        self.epsilon = max(
-            self.epsilon_end, 
-            self.epsilon_start - (self.epsilon_start - self.epsilon_end) * self.steps_done / self.epsilon_decay
-        )
-    
-    def update_epsilon_cosine(self) -> None:
-        """엡실론 값 업데이트 (코사인 감소)"""
-        self.steps_done += 1
-        if self.steps_done < self.epsilon_decay:
-            cosine_decay = 0.5 * (1 + math.cos(math.pi * self.steps_done / self.epsilon_decay))
-            self.epsilon = self.epsilon_end + (self.epsilon_start - self.epsilon_end) * cosine_decay
-        else:
-            self.epsilon = self.epsilon_end
-    
-    def select_action(self, observation: np.ndarray) -> int:
-        """엡실론-그리디 정책에 따라 행동 선택"""
-        # 엡실론으로 탐색 또는 활용 결정
-        if random.random() < self.epsilon:
-            return self.explore()
-        else:
-            return self.exploit(observation)[0]
-    
-    def explore(self) -> int:
-        """무작위 행동 선택 (탐색)"""
-        return self.action_space.sample()
-    
-    def exploit(self, observation: np.ndarray) -> np.ndarray:
-        """현재 정책에 따라 최적 행동 선택 (활용)"""
-        obs = torch.as_tensor(observation, dtype=torch.float32, device=self.device)
-
-        if obs.ndim == 1:
-            obs = obs.unsqueeze(0)  # (obs_dim,) → (1, obs_dim)
-
-        with torch.no_grad():
-            _, action_idx = self.q_net(obs).max(dim=1)  # shape: (batch_size,)
         
-        return action_idx.cpu().numpy()  # return np.ndarray of ints
-    
-    def predict_q_values(self, observation: np.ndarray) -> np.ndarray:
-        """주어진 상태에 대한 Q-값 예측"""
-        obs = torch.as_tensor(observation, dtype=torch.float32, device=self.device)
+        # Embedded replay buffer
+        self.replay_buffer = ReplayBuffer(config.buffer_size, device)
         
-        if obs.ndim == 1:
-            obs = obs.unsqueeze(0)  # (obs_dim,) → (1, obs_dim)
+        # Epsilon decay rate
+        self.epsilon_decay_rate = (self._epsilon_start - self._epsilon_end) / self._epsilon_decay
+    
+    def select_action(self, observation: np.ndarray, training: bool = True) -> int:
+        """Select action using epsilon-greedy or deterministic policy"""
+        # Exploration case: epsilon-greedy, training mode, or warmup period
+        if training and ((np.random.rand() < self._epsilon) or (self.total_steps < self.warmup_steps)):
+            return self.action_space.sample()
+        else:
+            return self._exploit(observation)
+    
+    def process(self, transition: tuple) -> Dict[str, float]:
+        """Process a transition and update the agent"""
+        state, action, reward, next_state, done = transition
+        
+        # Increment step count
+        self.total_steps += 1
+        
+        # Add to buffer
+        self.replay_buffer.add(state, action, reward, next_state, done)
+        
+        metrics = {"loss": 0.0, "epsilon": self._epsilon, "steps": self.total_steps}
+        
+        # Train if enough samples and past warmup
+        if self.total_steps > self.warmup_steps and len(self.replay_buffer) > self.batch_size:
+            batch = self.replay_buffer.sample(self.batch_size)
+            loss = self._compute_td_loss(batch)
             
+            # Optimize
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
+            
+            metrics["loss"] = loss.item()
+        
+        # Update target network periodically
+        if self.total_steps % self.target_update_interval == 0:
+            self._update_target_network()
+        
+        # Update epsilon
+        if self.total_steps > self.warmup_steps:
+            self._epsilon = max(self._epsilon_end, self._epsilon - self.epsilon_decay_rate)
+        
+        metrics["epsilon"] = self._epsilon
+        return metrics
+    
+    def save(self, path: str) -> None:
+        """Save model state"""
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        
+        save_dict = {
+            'q_net': self.q_net.state_dict(),
+            'target_net': self.target_net.state_dict(),
+            'optimizer': self.optimizer.state_dict(),
+            'total_steps': self.total_steps,
+            'epsilon': self._epsilon,
+            'config': self.config
+        }
+        
+        torch.save(save_dict, path)
+    
+    def load(self, path: str) -> None:
+        """Load model state"""
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Model file not found at {path}")
+        
+        checkpoint = torch.load(path, map_location=self.device)
+        
+        self.q_net.load_state_dict(checkpoint['q_net'])
+        self.target_net.load_state_dict(checkpoint['target_net'])
+        self.optimizer.load_state_dict(checkpoint['optimizer'])
+        
+        # Restore training state
+        self.total_steps = checkpoint.get('total_steps', 0)
+        self._epsilon = checkpoint.get('epsilon', self._epsilon_end)
+    
+    def train(self) -> None:
+        """Set to training mode"""
+        super().train()
+        self.q_net.train()
+        
+    def eval(self) -> None:
+        """Set to evaluation mode"""
+        super().eval()
+        self.q_net.eval()
+    
+    def to(self, device: str) -> None:
+        """Move to device"""
+        super().to(device)
+        self.q_net.to(device)
+        self.target_net.to(device)
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """Get agent statistics"""
+        stats = super().get_stats()
+        stats.update({
+            "epsilon": self._epsilon,
+            "buffer_size": len(self.replay_buffer),
+            "warmup_complete": self.total_steps > self.warmup_steps
+        })
+        return stats
+    
+    # Private methods
+    def _exploit(self, observation: np.ndarray) -> int:
+        """Select greedy action"""
+        obs = torch.as_tensor(observation, dtype=torch.float32, device=self.device)
+        
+        if obs.ndim == 1:
+            obs = obs.unsqueeze(0)
+        
         with torch.no_grad():
             q_values = self.q_net(obs)
-            
-        return q_values.cpu().numpy()
+            action = q_values.argmax(dim=1).item()
+        
+        return action
     
-    def compute_td_loss(self, samples) -> torch.Tensor:
-        """시간차 학습 손실 계산"""
+    def _compute_td_loss(self, samples) -> torch.Tensor:
+        """Compute temporal difference loss"""
         states, actions, rewards, next_states, dones = samples
+        
+        # Move to device
         states = states.to(self.device)
         actions = actions.to(self.device)
         rewards = rewards.to(self.device)
         next_states = next_states.to(self.device)
         dones = dones.to(self.device)
         
-        # 현재 Q 값 계산
+        # Current Q values
         current_q = self.q_net(states).gather(1, actions.unsqueeze(1)).squeeze(1)
         
-        # 타겟 Q 값 계산
+        # Target Q values
         with torch.no_grad():
-            next_q = self.target_network(next_states).max(1)[0]
+            next_q = self.target_net(next_states).max(1)[0]
             target_q = rewards + self.gamma * next_q * (1 - dones)
-            
-        # 손실 계산
-        loss = self.criterion(current_q, target_q)
         
+        # Compute loss
+        loss = self.criterion(current_q, target_q)
         return loss
     
-    def update(self, samples) -> float:
-        """샘플로 네트워크 업데이트"""
-        loss = self.compute_td_loss(samples)
-        
-        # 옵티마이저 업데이트
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
-        
-        return loss.item()
-    
-    def save(self, path: str, step: int = None, is_best: bool = False) -> str:
-        """모델 저장"""
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        
-        if step is not None:
-            save_path = f"{path}_{step}.pt"
-        elif is_best:
-            save_path = f"{path}_best.pt"
-        else:
-            save_path = f"{path}_final.pt"
-        
-        torch.save(self.q_net.state_dict(), save_path)
-        return save_path
-    
-    def load(self, path: str) -> None:
-        """모델 로드"""
-        if not os.path.exists(path):
-            raise FileNotFoundError(f"Model file not found at {path}")
-        
-        self.q_net.load_state_dict(torch.load(path, map_location=self.device))
-        self.update_target_network()
-        
-    def train(self) -> None:
-        """학습 모드 설정"""
-        self.q_net.train()
-        
-    def eval(self) -> None:
-        """평가 모드 설정"""
-        self.q_net.eval()
-
-    def create_buffer(self, buffer_size: int) -> ReplayBuffer:
-        """Create a new replay buffer with the specified size"""
-        return ReplayBuffer(buffer_size, self.device)
+    def _update_target_network(self) -> None:
+        """Hard update target network"""
+        self.target_net.load_state_dict(self.q_net.state_dict())
 
 # TODO: observation이 input으로 들어올 때엔 batch로 들어올 수 있으므로, 조심하기 
 # replace buffer는 stable baseline에서 구현 된 것 가져오기 
