@@ -48,7 +48,7 @@ class DroneDQNAgent(BaseRLAgent):
         # Optimizer and loss function
         self.optimizer = torch.optim.Adam(self.q_net.parameters(), lr=self.learning_rate)
         self.criterion = nn.MSELoss()
-        
+
         # Embedded replay buffer
         self.replay_buffer = ReplayBuffer(config.buffer_size, device)
         
@@ -161,11 +161,11 @@ class DroneDQNAgent(BaseRLAgent):
         
         if obs.ndim == 1:
             obs = obs.unsqueeze(0)
-        
+            
         with torch.no_grad():
             q_values = self.q_net(obs)
             action = q_values.argmax(dim=1).item()
-        
+            
         return action
     
     def _compute_td_loss(self, samples) -> torch.Tensor:
@@ -186,7 +186,7 @@ class DroneDQNAgent(BaseRLAgent):
         with torch.no_grad():
             next_q = self.target_net(next_states).max(1)[0]
             target_q = rewards + self.gamma * next_q * (1 - dones)
-        
+            
         # Compute loss
         loss = self.criterion(current_q, target_q)
         return loss
