@@ -1,0 +1,19 @@
+# DQN Pursuer vs Hovering Evader Scenario
+drones:
+  - role: PURSUER
+    agent_type: dqn
+    start_pos: [1.0, 1.0, 1.0]
+    start_orn: [0.0, 0.0, 0.0]
+    action_length: 7.0
+    is_training: true
+    resume_from: null
+    name: "dqn_pursuer"
+  
+  - role: EVADER
+    agent_type: hovering
+    start_pos: [-1.0, -1.0, 1.0]
+    start_orn: [0.0, 0.0, 0.0]
+    action_length: 7.0
+    is_training: false
+    resume_from: null
+    name: "hovering_evader" 

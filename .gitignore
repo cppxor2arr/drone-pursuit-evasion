@@ -176,5 +176,4 @@ cython_debug/
 weights/
 wandb/
 .vscode
-conf/
 outputs/

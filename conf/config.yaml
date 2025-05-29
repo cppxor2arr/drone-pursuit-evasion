@@ -1,0 +1,77 @@
+defaults:
+  - agent: dqn
+  - environment: pursuit_evasion
+  - training: default
+  - scenario: pursuit_evasion
+  - _self_
+
+# Experiment settings
+experiment_name: "drone_pursuit_evasion"
+seed: 42
+device: "auto"  # auto, cpu, cuda
+
+# Wandb settings
+wandb:
+  project: "drone-pursuit-evasion"
+  entity: null
+  mode: "online"  # online, offline, disabled
+  tags: []
+  notes: ""
+
+# Paths
+paths:
+  weights_dir: "weights"
+  logs_dir: "logs"
+  data_dir: "data"
+
+# Hydra job settings
+hydra:
+  run:
+    dir: outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  job:
+    chdir: true
+
+agent:
+  _target_: RL.dqn_agent.DroneDQNAgent
+  gamma: 0.99
+  learning_rate: 0.0005
+  epsilon_start: 1.0
+  epsilon_end: 0.05
+  epsilon_decay: 7000000
+  network:
+    hidden_dims: [120, 84, 84]
+  target_update_interval: 1000
+  soft_update_tau: 0.005
+  batch_size: 64
+  buffer_size: 10000
+
+environment:
+  name: pursuit_evasion
+  lidar_reach: 4.0
+  num_ray: 20
+  flight_mode: 7
+  render_simulation: false
+  max_episode_steps: 500
+  capture_threshold: 0.1
+  pursuer_capture_reward: 20.0
+  evader_capture_penalty: -10.0
+  collision_penalty: -30.0
+  out_of_bounds_penalty: -30.0
+  distance_reward_coef: 2.0
+  evader_survival_reward: 0.1
+  evader_safe_distance: 2.0
+  evader_safe_distance_reward: 0.5
+  pursuer_proximity_threshold: 1.0
+  pursuer_proximity_coef: 1.0
+  time_reward_coef: 0.01
+
+training:
+  total_timesteps: 10000000
+  save_interval: 5000
+  evaluate_interval: 2000
+  eval_episodes: 3
+  eval_render: true
+  save_best_model: true
+  save_final_model: true
+  log_interval: 100
+  resume_from: null 

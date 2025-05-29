@@ -1,0 +1,26 @@
+# @package _global_
+environment:
+  name: "pursuit_evasion"
+  
+  # Environment parameters
+  lidar_reach: 4.0
+  num_ray: 20
+  flight_mode: 7
+  render_simulation: false
+  
+  # Episode settings
+  max_episode_steps: 500
+  
+  # Reward parameters
+  capture_threshold: 0.1
+  pursuer_capture_reward: 20.0
+  evader_capture_penalty: -10.0
+  collision_penalty: -30.0
+  out_of_bounds_penalty: -30.0
+  distance_reward_coef: 2.0
+  evader_survival_reward: 0.1
+  evader_safe_distance: 2.0
+  evader_safe_distance_reward: 0.5
+  pursuer_proximity_threshold: 1.0
+  pursuer_proximity_coef: 1.0
+  time_reward_coef: 0.01 

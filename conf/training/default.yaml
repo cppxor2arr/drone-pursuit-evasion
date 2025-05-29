@@ -1,0 +1,20 @@
+# @package _global_
+training:
+  # Training parameters
+  total_timesteps: 10000000
+  save_interval: 5000
+  evaluate_interval: 2000
+  
+  # Evaluation settings
+  eval_episodes: 3
+  eval_render: true
+  
+  # Checkpointing
+  save_best_model: true
+  save_final_model: true
+  
+  # Logging frequency
+  log_interval: 100
+  
+  # Resume training
+  resume_from: null 

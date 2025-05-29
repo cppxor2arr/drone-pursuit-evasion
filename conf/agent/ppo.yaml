@@ -1,0 +1,13 @@
+_target_: RL.ppo_agent.DronePPOAgent
+gamma: 0.99
+learning_rate: 0.0003
+clip_range: 0.2
+value_coef: 0.5
+entropy_coef: 0.01
+gae_lambda: 0.95
+max_grad_norm: 0.5
+ppo_epochs: 10
+batch_size: 256
+buffer_size: 2048
+network:
+  hidden_dims: [256, 256] 

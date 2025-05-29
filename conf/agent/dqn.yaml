@@ -1,0 +1,24 @@
+# @package _global_
+agent:
+  _target_: RL.dqn_agent.DroneDQNAgent
+  
+  # Learning parameters
+  gamma: 0.99
+  learning_rate: 0.0005
+  
+  # Exploration parameters
+  epsilon_start: 1.0
+  epsilon_end: 0.05
+  epsilon_decay: 7000000
+  
+  # Network architecture
+  network:
+    hidden_dims: [120, 84, 84]
+  
+  # Target network update
+  target_update_interval: 1000
+  soft_update_tau: 0.005
+  
+  # Training parameters
+  batch_size: 64
+  buffer_size: 10000 
