@@ -117,13 +117,11 @@ def evaluate_agents(agents: dict, config: DictConfig, global_step: int, scenario
     """Evaluate agents performance"""
     print(f"\nEvaluating at step {global_step}...")
     
-    # Create evaluation environment
+    # Create evaluation environment using config objects
     eval_env = LidarDroneBaseEnv(
-        lidar_reach=config.environment.lidar_reach,
-        num_ray=config.environment.num_ray,
-        flight_mode=config.environment.flight_mode,
-        drone_configs=create_drone_configs(scenario_config),
-        render_simulation=config.training.eval_render
+        env_config=config.environment,
+        scenario_config=scenario_config,
+        drone_configs=create_drone_configs(scenario_config)
     )
     
     # Initialize
@@ -346,22 +344,31 @@ def setup_training(config: DictConfig) -> Tuple[str, str, str, Path]:
     print(f"Device: {device}")
     print(f"Config:\n{OmegaConf.to_yaml(config)}")
     
-    # Create weights directory
-    weights_dir = Path(config.paths.weights_dir) / "pursuit_evade" / timestamp
+    # Create weights directory with better organization
+    # Use absolute path to avoid Hydra's working directory change
+    original_cwd = hydra.utils.get_original_cwd()
+    weights_dir = Path(original_cwd) / config.paths.weights_dir / config.experiment_name / timestamp
     weights_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Also create a "latest" symlink for easy access
+    latest_dir = Path(original_cwd) / config.paths.weights_dir / config.experiment_name / "latest"
+    if latest_dir.exists() or latest_dir.is_symlink():
+        latest_dir.unlink()
+    latest_dir.symlink_to(timestamp, target_is_directory=True)
+    
+    print(f"Weights will be saved to: {weights_dir}")
+    print(f"Latest weights available at: {latest_dir}")
     
     return device, run_name, timestamp, weights_dir
 
 
 def create_training_environment(config: DictConfig, drone_configs: list):
     """Create and initialize the training environment"""
-    # Create environment
+    # Create environment using config objects
     env = LidarDroneBaseEnv(
-        lidar_reach=config.environment.lidar_reach,
-        num_ray=config.environment.num_ray,
-        flight_mode=config.environment.flight_mode,
-        drone_configs=drone_configs,
-        render_simulation=config.environment.render_simulation
+        env_config=config.environment,
+        scenario_config=config.scenario,
+        drone_configs=drone_configs
     )
     
     # Initialize environment

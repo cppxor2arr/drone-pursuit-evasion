@@ -1,0 +1,42 @@
+defaults:
+  - agent: dqn
+  - environment: pursuit_evasion
+  - scenario: pursuit_evasion
+  - _self_
+
+# Visualization specific settings
+visualization:
+  name: "Drone Pursuit-Evasion Demo"
+  episodes: 3                    # Number of episodes to run
+  max_episode_steps: 100         # Maximum steps per episode (shorter for demo)
+  slow_motion: true              # Add delay for better visualization (ENABLED)
+  pause_between_episodes: true   # Pause between episodes for manual control
+  sleep_time: 0.05               # Time to sleep between steps (in seconds)
+  
+  # Model loading options (choose one method)
+  # Method 1: Auto-detect latest weights (recommended - leave weights_dir empty)
+  weights_dir: ""  # Empty = auto-detect latest from experiment
+  
+  # Method 2: Specify weights directory manually 
+  # weights_dir: "weights/drone_pursuit_evasion/20250519_223045"
+  
+  # Method 3: Specific model paths for each agent (uncomment to use)
+  # model_paths:
+  #   uav_0: "path/to/pursuer_model.pt"
+  #   uav_1: "path/to/evader_model.pt"
+
+# Override environment settings for visualization
+environment:
+  render_simulation: true   # Enable GUI for visualization  
+  stage: "multiple"        # Can override: "open", "single", "multiple"
+
+# System settings
+device: "auto"
+seed: 42
+
+# Experiment name (for auto-detecting weights)
+experiment_name: "drone_pursuit_evasion"
+
+# Paths (for auto-detecting weights)
+paths:
+  weights_dir: "weights" 
