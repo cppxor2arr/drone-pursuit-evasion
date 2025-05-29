@@ -73,6 +73,17 @@ class PPOBuffer:
             'returns': self.returns[indices]
         }
     
+    def get_all(self):
+        """Get all experiences from buffer"""
+        return (
+            self.observations[:self.size],
+            self.actions[:self.size],
+            self.rewards[:self.size],
+            self.values[:self.size],
+            self.log_probs[:self.size],
+            self.dones[:self.size]
+        )
+    
     def clear(self):
         """Clear the buffer"""
         self.ptr = 0
@@ -211,7 +222,12 @@ class DronePPOAgent(BaseRLAgent):
         if not os.path.exists(path):
             raise FileNotFoundError(f"Model file not found at {path}")
         
-        checkpoint = torch.load(path, map_location=self.device)
+        # Use weights_only=False for backward compatibility with older models
+        try:
+            checkpoint = torch.load(path, map_location=self.device, weights_only=True)
+        except Exception:
+            # Fallback for older model files
+            checkpoint = torch.load(path, map_location=self.device, weights_only=False)
         
         self.actor.load_state_dict(checkpoint['actor'])
         self.critic.load_state_dict(checkpoint['critic'])
@@ -260,10 +276,10 @@ class DronePPOAgent(BaseRLAgent):
         # Normalize advantages
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
         
-        # Convert to tensors
-        states = torch.stack(states).to(self.device)
-        actions = torch.tensor(actions, dtype=torch.long, device=self.device)
-        old_log_probs = torch.tensor(log_probs, dtype=torch.float32, device=self.device)
+        # Convert to tensors - states is already a tensor from buffer
+        states = states.to(self.device)  # states is already a tensor
+        actions = actions.to(self.device)  # actions is already a tensor
+        old_log_probs = log_probs.to(self.device)  # log_probs is already a tensor
         returns = returns.to(self.device)
         advantages = advantages.to(self.device)
         
@@ -323,8 +339,16 @@ class DronePPOAgent(BaseRLAgent):
             "entropy": total_entropy / self.ppo_epochs
         }
     
-    def _compute_gae(self, rewards: list, values: list, dones: list, final_value: float):
+    def _compute_gae(self, rewards, values, dones, final_value: float):
         """Compute Generalized Advantage Estimation"""
+        # Convert tensors to lists if needed
+        if isinstance(rewards, torch.Tensor):
+            rewards = rewards.cpu().tolist()
+        if isinstance(values, torch.Tensor):
+            values = values.cpu().tolist()
+        if isinstance(dones, torch.Tensor):
+            dones = dones.cpu().tolist()
+            
         advantages = []
         returns = []
         gae = 0

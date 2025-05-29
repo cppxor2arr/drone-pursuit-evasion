@@ -21,6 +21,12 @@ class AgentType(Enum):
     RANDOM = "random"
     HOVERING = "hovering"
 
+class EnvironmentStage(Enum):
+    """Environment complexity stages"""
+    OPEN = "open"          # Stage 1: No obstacles (open space)
+    SINGLE_OBSTACLE = "single"  # Stage 2: One cylinder in the middle
+    MULTIPLE_OBSTACLES = "multiple"  # Stage 3: Current setting (grid of cylinders)
+
 
 class DroneConfig:
     """Configuration class for a drone in the environment"""
@@ -78,16 +84,67 @@ class Actions:
 class LidarDroneBaseEnv(MAQuadXHoverEnv):
     def __init__(
         self,
-        lidar_reach: float,
-        num_ray: int,
+        env_config=None,  # Environment configuration object
+        scenario_config=None,  # Scenario configuration object
+        # Legacy parameters for backward compatibility
+        lidar_reach: float = None,
+        num_ray: int = None,
         angle_representations: str = "quaternion",
         drone_configs: Optional[List[DroneConfig]] = None,
-        render_simulation: bool = False,  # Whether to render the simulation
+        render_simulation: bool = None,
         *args,
         **kwargs,
     ):
+        # Handle config objects vs individual parameters
+        if env_config is not None:
+            # Use config objects (new approach)
+            self.lidar_reach = env_config.lidar_reach
+            self.num_ray = env_config.num_ray
+            self.render_simulation = env_config.render_simulation
+            self.environment_stage = EnvironmentStage(env_config.get('stage', 'multiple'))
+            
+            # Extract reward parameters from config
+            self.capture_threshold = env_config.get('capture_threshold', 0.1)
+            self.pursuer_capture_reward = env_config.get('pursuer_capture_reward', 20.0)
+            self.evader_capture_penalty = env_config.get('evader_capture_penalty', -10.0)
+            self.collision_penalty = env_config.get('collision_penalty', -30.0)
+            self.out_of_bounds_penalty = env_config.get('out_of_bounds_penalty', -30.0)
+            self.distance_reward_coef = env_config.get('distance_reward_coef', 2.0)
+            self.evader_survival_reward = env_config.get('evader_survival_reward', 0.1)
+            self.evader_safe_distance = env_config.get('evader_safe_distance', 2.0)
+            self.evader_safe_distance_reward = env_config.get('evader_safe_distance_reward', 0.5)
+            self.pursuer_proximity_threshold = env_config.get('pursuer_proximity_threshold', 1.0)
+            self.pursuer_proximity_coef = env_config.get('pursuer_proximity_coef', 1.0)
+            self.time_reward_coef = env_config.get('time_reward_coef', 0.01)
+            self.max_episode_steps = env_config.get('max_episode_steps', 500)
+            
+            # Get drone configs from scenario_config if available
+            if scenario_config is not None and hasattr(scenario_config, 'drones'):
+                drone_configs = self._create_drone_configs_from_scenario(scenario_config)
+        else:
+            # Use individual parameters (legacy approach)
+            self.lidar_reach = lidar_reach or 4.0
+            self.num_ray = num_ray or 20
+            self.render_simulation = render_simulation if render_simulation is not None else False
+            self.environment_stage = EnvironmentStage.MULTIPLE_OBSTACLES  # Default to current setting
+            
+            # Default reward parameters (legacy)
+            self.capture_threshold = 0.1
+            self.pursuer_capture_reward = 20.0
+            self.evader_capture_penalty = -10.0
+            self.collision_penalty = -30.0
+            self.out_of_bounds_penalty = -30.0
+            self.distance_reward_coef = 2.0
+            self.evader_survival_reward = 0.1
+            self.evader_safe_distance = 2.0
+            self.evader_safe_distance_reward = 0.5
+            self.pursuer_proximity_threshold = 1.0
+            self.pursuer_proximity_coef = 1.0
+            self.time_reward_coef = 0.01
+            self.max_episode_steps = 500
+
         # Set render_mode based on render_simulation flag
-        if not render_simulation and 'render_mode' in kwargs and kwargs['render_mode'] == 'human':
+        if not self.render_simulation and 'render_mode' in kwargs and kwargs['render_mode'] == 'human':
             kwargs['render_mode'] = None
         
         # Handle start positions and orientations from drone_configs
@@ -102,10 +159,6 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
         
         # Initialize base environment
         super().__init__(*args, **kwargs)
-
-        self.lidar_reach = lidar_reach
-        self.num_ray = num_ray
-        self.render_simulation = render_simulation
 
         velocity_dim = 3
         target_position = 3
@@ -123,26 +176,68 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
         
         # Agent roles will be initialized on reset
         self.agent_roles = {}
+
+    def _create_drone_configs_from_scenario(self, scenario_config):
+        """Create DroneConfig objects from scenario configuration"""
+        configs = []
+        for drone in scenario_config.drones:
+            role = getattr(DroneRole, drone.role)
+            agent_type = AgentType(drone.agent_type)
+            configs.append(DroneConfig(
+                role=role,
+                agent_type=agent_type,
+                start_pos=np.array(drone.start_pos),
+                start_orn=np.array(drone.start_orn),
+                action_length=drone.action_length,
+                is_training=drone.is_training,
+                resume_from=drone.resume_from,
+                name=drone.name
+            ))
+        return configs
+
+    def create_obstacles(self):
+        """Create obstacles based on environment stage"""
+        if self.environment_stage == EnvironmentStage.OPEN:
+            # Stage 1: No obstacles (open space)
+            print("Environment Stage 1: Open space (no obstacles)")
+            return
         
-        # Reward parameters
-        self.capture_threshold = 0.1  # 10cm threshold for capture
-        self.pursuer_capture_reward = 20.0   # Reward for pursuer when capturing evader
+        elif self.environment_stage == EnvironmentStage.SINGLE_OBSTACLE:
+            # Stage 2: Single cylinder in the middle
+            print("Environment Stage 2: Single obstacle in center")
+            obs_radius = 0.5
+            obs_height = 7.0
+            obs_loc = [0.0, 0.0]  # Center position
+            
+            obsCollisionId = self.aviary.createCollisionShape(
+                shapeType=p.GEOM_CYLINDER, 
+                radius=obs_radius, 
+                height=obs_height
+            )
+            obsId = self.aviary.createMultiBody(
+                baseMass=0.0,
+                baseCollisionShapeIndex=obsCollisionId,
+                basePosition=obs_loc + [obs_height / 2.0],
+            )
         
-        # Modified rewards for evader
-        self.evader_capture_penalty = -10.0  # Reduced penalty for evader when captured
-        self.collision_penalty = -30.0       # Increased penalty for collision with objects
-        self.out_of_bounds_penalty = -30.0   # Increased penalty for going out of bounds
-        
-        self.distance_reward_coef = 2.0      # Coefficient for distance-based rewards
-        self.evader_survival_reward = 0.1    # Small reward for evader surviving each step
-        self.evader_safe_distance = 2.0      # Distance at which evader gets extra reward
-        self.evader_safe_distance_reward = 0.5 # Reward for maintaining safe distance
-        self.pursuer_proximity_threshold = 1.0 # Threshold for pursuer proximity bonus
-        self.pursuer_proximity_coef = 1.0    # Coefficient for pursuer proximity bonus
-        
-        # Episode time rewards to encourage longer episodes
-        self.time_reward_coef = 0.01         # Small reward for each step
-        self.max_episode_steps = 500         # Maximum episode length
+        elif self.environment_stage == EnvironmentStage.MULTIPLE_OBSTACLES:
+            # Stage 3: Multiple obstacles in grid pattern (current setting)
+            print("Environment Stage 3: Multiple obstacles (grid pattern)")
+            obs_radius = 0.5
+            obs_height = 7.0
+            obstacles = [[2*i, 2*j] for i in range(-3, 3) for j in range(-3, 3)]
+            
+            for obs_loc in obstacles:
+                obsCollisionId = self.aviary.createCollisionShape(
+                    shapeType=p.GEOM_CYLINDER, 
+                    radius=obs_radius, 
+                    height=obs_height
+                )
+                obsId = self.aviary.createMultiBody(
+                    baseMass=0.0,
+                    baseCollisionShapeIndex=obsCollisionId,
+                    basePosition=obs_loc + [obs_height / 2.0],
+                )
 
     def laycast(self, position: np.ndarray, quaternion: np.ndarray) -> np.ndarray:
         # You need to change this term to change lidar observation.
@@ -309,8 +404,6 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
             if i < len(self.agents):
                 agent_name = self.agents[i]
                 self.agent_roles[agent_name] = config.role
-
-        
 
     def compute_term_trunc_reward_info_by_id(
         self, agent_id: int, prev_observations: dict[str, Any]
@@ -516,7 +609,9 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
                 left_ag_id = (ag_id - 1) % NUM_AGENT
                 left_ag = f"uav_{left_ag_id}"
 
-                observations[ag][-3:] -= self.prev_observations[left_ag][-3:]
+                # Check if the other agent exists in prev_observations
+                if left_ag in self.prev_observations and ag in observations:
+                    observations[ag][-3:] -= self.prev_observations[left_ag][-3:]
 
             return observations, rewards, terminations, truncations, infos
         
@@ -541,6 +636,7 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
             script_dir = os.path.dirname(os.path.abspath(__file__))
             mesh_file = os.path.join(os.path.dirname(script_dir), "hi_res_sphere.obj")
             
+            # Create dome boundaries
             concaveSphereCollisionId = self.aviary.createCollisionShape(
                 shapeType=p.GEOM_MESH,
                 fileName=mesh_file,
@@ -574,16 +670,11 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
                 basePosition=[0.0, 0.0, 0.0],
                 useMaximalCoordinates=True,
             )
-            obs_radius = 0.5
-            obs_height = 7.0
-            obstacles = [[2*i,2*j] for i in range(-3, 3) for j in range(-3, 3)]
-            for obs_loc in obstacles:
-                obsCollisionId = self.aviary.createCollisionShape(shapeType=p.GEOM_CYLINDER, radius=obs_radius, height=obs_height)
-                obsId = self.aviary.createMultiBody(
-                baseMass=0.0,
-                baseCollisionShapeIndex=obsCollisionId,
-                basePosition=obs_loc + [obs_height / 2.0],
-                )
+            
+            # Create obstacles based on environment stage
+            self.create_obstacles()
+            
+            # Register all new bodies
             self.aviary.register_all_new_bodies()
 
             NUM_AGENT = 2
@@ -624,7 +715,9 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
                 left_ag_id = (ag_id - 1) % NUM_AGENT
                 left_ag = f"uav_{left_ag_id}"
 
-                observations[ag][-3:] -= self.prev_observations[left_ag][-3:]
+                # Check if the other agent exists in prev_observations
+                if left_ag in self.prev_observations and ag in observations:
+                    observations[ag][-3:] -= self.prev_observations[left_ag][-3:]
 
             return observations, infos
         

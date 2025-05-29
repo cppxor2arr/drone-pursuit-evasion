@@ -339,8 +339,16 @@ class DroneSACAgent(BaseRLAgent):
         torch.save(save_dict, path)
     
     def load(self, path: str) -> None:
-        """Load agent state"""
-        checkpoint = torch.load(path, map_location=self.device)
+        """Load model state"""
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Model file not found at {path}")
+        
+        # Use weights_only=False for backward compatibility with older models
+        try:
+            checkpoint = torch.load(path, map_location=self.device, weights_only=True)
+        except Exception:
+            # Fallback for older model files
+            checkpoint = torch.load(path, map_location=self.device, weights_only=False)
         
         self.actor.load_state_dict(checkpoint['actor'])
         self.critic1.load_state_dict(checkpoint['critic1'])

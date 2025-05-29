@@ -6,7 +6,7 @@ import os
 import math
 from typing import Dict, Union, Any
 from gymnasium.spaces import Discrete, Box
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 
 from .base_agent import BaseRLAgent
 from .networks import QNetwork
@@ -108,7 +108,8 @@ class DroneDQNAgent(BaseRLAgent):
             'optimizer': self.optimizer.state_dict(),
             'total_steps': self.total_steps,
             'epsilon': self._epsilon,
-            'config': self.config
+            # Don't save config object to avoid compatibility issues
+            'config_dict': OmegaConf.to_container(self.config, resolve=True)
         }
         
         torch.save(save_dict, path)
@@ -118,7 +119,13 @@ class DroneDQNAgent(BaseRLAgent):
         if not os.path.exists(path):
             raise FileNotFoundError(f"Model file not found at {path}")
         
-        checkpoint = torch.load(path, map_location=self.device)
+        # Use weights_only=False for backward compatibility with older models
+        # In production, use weights_only=True and retrain models
+        try:
+            checkpoint = torch.load(path, map_location=self.device, weights_only=True)
+        except Exception:
+            # Fallback for older model files
+            checkpoint = torch.load(path, map_location=self.device, weights_only=False)
         
         self.q_net.load_state_dict(checkpoint['q_net'])
         self.target_net.load_state_dict(checkpoint['target_net'])
