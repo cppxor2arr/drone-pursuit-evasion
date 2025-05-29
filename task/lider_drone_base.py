@@ -7,14 +7,19 @@ from PyFlyt.pz_envs.quadx_envs.ma_quadx_hover_env import (
 )  # MAQuadXBaseEnv
 import math
 from enum import Enum
+import os
 
 
 class DroneRole(Enum):
     PURSUER = 0
     EVADER = 1
-    HOVER = 2
-    RANDOM = 3
-    GREEDY = 4
+
+class AgentType(Enum):
+    DQN = "dqn"
+    PPO = "ppo"
+    SAC = "sac"
+    RANDOM = "random"
+    HOVERING = "hovering"
 
 
 class DroneConfig:
@@ -22,6 +27,7 @@ class DroneConfig:
     def __init__(
         self,
         role: DroneRole,
+        agent_type: AgentType = AgentType.DQN,  # Type of agent using enum
         start_pos: np.ndarray = None,
         start_orn: np.ndarray = None,
         action_length: float = 7.0,
@@ -30,13 +36,13 @@ class DroneConfig:
         name: str = None
     ):
         self.role = role
+        self.agent_type = agent_type  # Now using AgentType enum
         self.start_pos = start_pos  # 3D position [x, y, z]
         self.start_orn = start_orn  # 3D orientation [roll, pitch, yaw]
         self.action_length = action_length  # Length of actions for this drone
         self.is_training = is_training  # Whether this drone is being trained
         self.resume_from = resume_from  # Path to model to resume from
         self.name = name  # Optional name (will be auto-assigned if None)
-
 
 class Actions:
     def __init__(self, length: float = 1.0):
@@ -417,9 +423,17 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
                 # Handle different drone roles
                 agent_name = k
                 drone_role = self.agent_roles.get(agent_name, DroneRole.PURSUER)  # Default to PURSUER if no role
+
+                # Get agent type from drone config
+                agent_type = None
+                if self.drone_configs is not None:
+                    for config in self.drone_configs:
+                        if config.role == drone_role:
+                            agent_type = config.agent_type
+                            break
                 
                 # For HOVER role, don't move
-                if drone_role == DroneRole.HOVER:
+                if agent_type == AgentType.HOVERING:
                     # Set target position as current position for hovering
                     current_pos = self.aviary.state(agent_idx)[-1]
                     current_yaw = 0.0  # Use default yaw
@@ -428,7 +442,7 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
                     continue  # Skip the rest of the processing for hovering drones
                     
                 # For RANDOM role, choose a random action
-                if drone_role == DroneRole.RANDOM:
+                if agent_type == AgentType.RANDOM:
                     v = np.random.randint(0, len(self.actions))
                 
                 # Get action length for this drone from config if available
@@ -523,15 +537,19 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
         try:
             observations, infos = super().reset(seed, options)
 
+            # Use absolute path for mesh file
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            mesh_file = os.path.join(os.path.dirname(script_dir), "hi_res_sphere.obj")
+            
             concaveSphereCollisionId = self.aviary.createCollisionShape(
                 shapeType=p.GEOM_MESH,
-                fileName="hi_res_sphere.obj",
+                fileName=mesh_file,
                 meshScale=[-self.flight_dome_size] * 3,
                 flags=p.GEOM_FORCE_CONCAVE_TRIMESH,
             )
             concaveSphereVisualId = self.aviary.createVisualShape(
                 shapeType=p.GEOM_MESH,
-                fileName="hi_res_sphere.obj",
+                fileName=mesh_file,
                 meshScale=[-self.flight_dome_size] * 3,
                 rgbaColor=[0.2, 0.2, 1.0, 0.8],
                 specularColor=[0.4, 0.4, 0.4],
@@ -545,7 +563,7 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
             )
             convexSphereVisualId = self.aviary.createVisualShape(
                 shapeType=p.GEOM_MESH,
-                fileName="hi_res_sphere.obj",
+                fileName=mesh_file,
                 meshScale=[self.flight_dome_size] * 3,
                 rgbaColor=[0.2, 0.2, 1.0, 0.8],
                 specularColor=[0.4, 0.4, 0.4],
