@@ -1,6 +1,6 @@
 from gymnasium import spaces
 import numpy as np
-from typing import Any, Literal, Dict, Optional, List, Tuple, Union
+from typing import Any, Literal, Dict, Optional, List, Sequence, Tuple, Union
 import pybullet as p
 from PyFlyt.pz_envs.quadx_envs.ma_quadx_hover_env import (
     MAQuadXHoverEnv,
@@ -68,6 +68,7 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
         angle_representations: str = "quaternion",
         drone_configs: Optional[List[DroneConfig]] = None,
         render_simulation: bool = False,  # Whether to render the simulation
+        colors: Sequence[str] = [],
         *args,
         **kwargs,
     ):
@@ -128,6 +129,8 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
         # Episode time rewards to encourage longer episodes
         self.time_reward_coef = 0.01         # Small reward for each step
         self.max_episode_steps = 500         # Maximum episode length
+
+        self.colors = colors
 
     def laycast(self, position: np.ndarray, quaternion: np.ndarray) -> np.ndarray:
         # You need to change this term to change lidar observation.
@@ -489,6 +492,32 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
         self, seed=None, options=dict()
     ) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
         try:
+            self.start_pos = np.array(
+                [
+                    np.append(
+                        np.random.uniform(
+                            -self.flight_dome_size / 3**0.5,
+                            self.flight_dome_size / 3**0.5,
+                            2,
+                        ),
+                        np.random.uniform(
+                            0.1,
+                            self.flight_dome_size / 3**0.5,
+                        ),
+                    ),
+                    np.append(
+                        np.random.uniform(
+                            -self.flight_dome_size / 3**0.5,
+                            self.flight_dome_size / 3**0.5,
+                            2,
+                        ),
+                        np.random.uniform(
+                            0.1,
+                            self.flight_dome_size / 3**0.5,
+                        ),
+                    ),
+                ]
+            )
             observations, infos = super().reset(seed, options)
 
             concaveSphereCollisionId = self.aviary.createCollisionShape(
