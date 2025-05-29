@@ -23,7 +23,32 @@ python train_hydra.py scenario=sac_vs_sac
 python train_hydra.py scenario=mixed_agents
 ```
 
-### 2. Pursuer Algorithm Testing (vs Static Targets)
+### 2. Environment Complexity Stages
+
+Train on different environment complexities to progressively challenge your agents.
+
+**🎯 Recommended Approach - Use Stage Parameter Override:**
+
+```bash
+# Stage 1: Open Space (No Obstacles) - Easy
+python train_hydra.py scenario=sac_vs_sac environment.stage=open
+
+# Stage 2: Single Obstacle (One cylinder in center) - Medium  
+python train_hydra.py scenario=sac_vs_sac environment.stage=single
+
+# Stage 3: Multiple Obstacles (Grid pattern) - Hard
+python train_hydra.py scenario=sac_vs_sac environment.stage=multiple
+```
+
+**🔥 Works with ANY Scenario:**
+```bash
+# Any scenario can use any stage
+python train_hydra.py scenario=ppo_pursuer_vs_dqn_evader environment.stage=open
+python train_hydra.py scenario=dqn_pursuer_vs_hovering_evader environment.stage=single
+python train_hydra.py scenario=sac_pursuer_vs_ppo_evader environment.stage=multiple
+```
+
+### 3. Pursuer Algorithm Testing (vs Static Targets)
 
 ```bash
 # Test PPO Pursuer vs Hovering Evader
@@ -41,7 +66,7 @@ python train_hydra.py scenario=dqn_pursuer_vs_random_evader
 python train_hydra.py scenario=sac_vs_random  # SAC vs Random already exists
 ```
 
-### 3. Cross-Algorithm Competition
+### 4. Cross-Algorithm Competition
 
 ```bash
 # PPO Pursuer vs Intelligent Evaders
@@ -55,7 +80,7 @@ python train_hydra.py scenario=sac_pursuer_vs_ppo_evader
 python train_hydra.py scenario=dqn_pursuer_vs_ppo_evader
 ```
 
-### 4. Algorithm Comparison Matrix
+### 5. Algorithm Comparison Matrix
 
 | Pursuer | Evader | Scenario Command |
 |---------|--------|------------------|
@@ -73,7 +98,7 @@ python train_hydra.py scenario=dqn_pursuer_vs_ppo_evader
 | PPO | PPO | `scenario=ppo_vs_random` (modify config) |
 | SAC | SAC | `scenario=sac_vs_sac` |
 
-### 5. Training Duration Examples
+### 6. Training Duration Examples
 
 ```bash
 # Quick test (1K steps)
@@ -89,7 +114,7 @@ python train_hydra.py training.total_timesteps=50000
 python train_hydra.py training.total_timesteps=100000
 ```
 
-### 6. Hyperparameter Tuning Examples
+### 7. Hyperparameter Tuning Examples
 
 ```bash
 # DQN with different learning rates
@@ -112,7 +137,7 @@ python train_hydra.py scenario=ppo_vs_random agent.clip_range=0.2
 python train_hydra.py scenario=ppo_vs_random agent.clip_range=0.3
 ```
 
-### 7. Network Architecture Examples
+### 8. Network Architecture Examples
 
 ```bash
 # Small networks (faster training)
@@ -128,7 +153,7 @@ python train_hydra.py agent.network.hidden_dims=[256,256,128]
 python train_hydra.py agent.network.hidden_dims=[512,256,128,64]
 ```
 
-### 8. Logging and Monitoring Examples
+### 9. Logging and Monitoring Examples
 
 ```bash
 # Enable WandB logging

@@ -36,6 +36,18 @@ python train_hydra.py scenario=sac_vs_sac
 python train_hydra.py scenario=ppo_pursuer_vs_random_evader training.total_timesteps=10000
 ```
 
+### Environment Complexity Stages
+```bash
+# Stage 1: Open space (no obstacles) - Easy
+python train_hydra.py scenario=sac_vs_sac environment.stage=open
+
+# Stage 2: Single obstacle - Medium
+python train_hydra.py scenario=sac_vs_sac environment.stage=single
+
+# Stage 3: Multiple obstacles - Hard (default)
+python train_hydra.py scenario=sac_vs_sac environment.stage=multiple
+```
+
 ### Evaluation
 ```bash
 # Evaluate latest models with GUI
@@ -43,6 +55,18 @@ python evaluate_hydra.py
 
 # Evaluate without GUI (headless)
 python evaluate_trained_models.py --episodes 10
+```
+
+### Visualization
+```bash
+# Visualize pretrained models with 3D simulation
+python visualize_hydra.py
+
+# Visualize specific scenario and stage
+python visualize_hydra.py scenario=sac_vs_sac environment.stage=single
+
+# Load specific model weights
+python visualize_hydra.py visualization.weights_dir=weights/my_experiment/20241201_143022
 ```
 
 ## 🎯 Features
@@ -53,8 +77,15 @@ python evaluate_trained_models.py --episodes 10
 - **SAC**: Soft Actor-Critic with twin critics
 - **Special Agents**: Random and Hovering agents for baselines
 
+### **Environment Complexity Stages**
+- **Stage 1 (Open)**: Pure pursuit-evasion in open space - ideal for algorithm development
+- **Stage 2 (Single)**: Basic obstacle avoidance with one central cylinder
+- **Stage 3 (Multiple)**: Complex navigation through grid of obstacles
+- **Curriculum Learning**: Progressive training from simple to complex scenarios
+
 ### **Modular Training System**
 - **Refactored Architecture**: Clean, maintainable code structure
+- **Config-Based Environment**: Pass configuration objects instead of individual parameters
 - **Unified Agent API**: Consistent interface across all algorithms
 - **Flexible Scenarios**: Easy configuration of agent combinations
 - **Comprehensive Logging**: WandB integration with detailed metrics
@@ -143,6 +174,8 @@ conf/
 - **[📖 Complete Training Guide](README_TRAINING.md)** - Comprehensive training documentation
 - **[🎯 Training Examples](TRAINING_EXAMPLES.md)** - Practical examples and use cases  
 - **[⚡ Quick Reference](SCENARIO_QUICK_REFERENCE.md)** - Fast scenario lookup
+- **[🎓 Curriculum Learning Guide](CURRICULUM_LEARNING_GUIDE.md)** - Progressive complexity training (RECOMMENDED)
+- **[🏗️ Environment Stages Guide](ENVIRONMENT_STAGES_EXAMPLES.md)** - Detailed stage explanations
 
 ### **Legacy Files**
 - **[🗂️ legacy/](legacy/)** - Contains obsolete scripts (do not use)
@@ -232,3 +265,71 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ---
 
 **🚀 Ready to start? Check out the [Training Guide](README_TRAINING.md) for detailed instructions!**
+
+## 🎓 Curriculum Learning with Environment Stages
+
+### **Progressive Training Strategy**
+
+Instead of using separate environment config files, simply override the `stage` parameter for curriculum learning:
+
+```bash
+# 🌌 Stage 1: Start with open space (easiest)
+python train_hydra.py scenario=pursuit_evasion environment.stage=open training.total_timesteps=25000 experiment_name=curriculum_stage1
+
+# 🏗️ Stage 2: Add single obstacle (medium difficulty)  
+python train_hydra.py scenario=pursuit_evasion environment.stage=single training.total_timesteps=25000 experiment_name=curriculum_stage2
+
+# 🌆 Stage 3: Full complexity with multiple obstacles (hardest)
+python train_hydra.py scenario=pursuit_evasion environment.stage=multiple training.total_timesteps=50000 experiment_name=curriculum_stage3
+```
+
+### **Stage Parameter Options**
+- `environment.stage=open` - No obstacles (pure pursuit-evasion)
+- `environment.stage=single` - One central cylinder obstacle
+- `environment.stage=multiple` - Grid of obstacles (default)
+
+### **Transfer Learning Between Stages**
+```bash
+# Train base model on open stage
+python train_hydra.py scenario=sac_vs_sac environment.stage=open training.total_timesteps=30000 experiment_name=base_model
+
+# Transfer to single obstacle stage (resume from base model)
+python train_hydra.py scenario=sac_vs_sac environment.stage=single \
+  scenario.drones[0].resume_from=weights/base_model/pursuer_final.pt \
+  scenario.drones[1].resume_from=weights/base_model/evader_final.pt \
+  training.total_timesteps=30000 experiment_name=transferred_model
+
+# Final training on complex stage
+python train_hydra.py scenario=sac_vs_sac environment.stage=multiple \
+  scenario.drones[0].resume_from=weights/transferred_model/pursuer_final.pt \
+  scenario.drones[1].resume_from=weights/transferred_model/evader_final.pt \
+  training.total_timesteps=40000 experiment_name=final_model
+```
+
+### **Quick Stage Testing**
+```bash
+# Test any scenario across all stages quickly
+python train_hydra.py scenario=sac_vs_sac environment.stage=open training.total_timesteps=5000
+python train_hydra.py scenario=sac_vs_sac environment.stage=single training.total_timesteps=5000  
+python train_hydra.py scenario=sac_vs_sac environment.stage=multiple training.total_timesteps=5000
+```
+
+**💡 Tip**: The stage parameter works with any scenario - just change `environment.stage=X` to switch complexity levels!
+
+## ✅ Latest Updates (2024)
+
+### 🛠️ Major Improvements Completed
+- **✅ Fixed PPO Training**: Resolved buffer interface issues, now fully functional
+- **✅ Fixed Environment Errors**: Eliminated agent key errors and tensor/list type mismatches  
+- **✅ Added Visualization Script**: New `visualize_hydra.py` for 3D simulation demos
+- **✅ Simplified Configuration**: Removed redundant YAML files, use `environment.stage=X` instead
+- **✅ Enhanced Documentation**: Comprehensive guides for all features and use cases
+
+### 🚀 Ready-to-Use Features
+- **Multi-Algorithm Training**: PPO, DQN, SAC all working correctly
+- **Environment Complexity Stages**: Easy parameter switching between complexity levels
+- **Visualization & Evaluation**: Professional tools for model demonstration
+- **Curriculum Learning**: Progressive training from simple to complex environments
+- **Cross-Algorithm Competition**: Train any algorithm against any other
+
+---

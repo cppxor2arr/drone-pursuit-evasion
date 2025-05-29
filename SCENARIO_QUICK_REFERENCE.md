@@ -1,5 +1,43 @@
 # 🚁 Training Scenarios Quick Reference
 
+## Environment Complexity Stages
+
+### 🎯 Recommended: Use Stage Parameter Override
+
+```bash
+# 🌌 Stage 1: Open Space (Easy) - No obstacles
+python train_hydra.py scenario=sac_vs_sac environment.stage=open
+
+# 🏗️ Stage 2: Single Obstacle (Medium) - One cylinder in center
+python train_hydra.py scenario=sac_vs_sac environment.stage=single
+
+# 🌆 Stage 3: Multiple Obstacles (Hard) - Grid of cylinders  
+python train_hydra.py scenario=sac_vs_sac environment.stage=multiple
+```
+
+### Examples with Different Scenarios
+```bash
+# SAC vs SAC across all stages
+python train_hydra.py scenario=sac_vs_sac environment.stage=open
+python train_hydra.py scenario=sac_vs_sac environment.stage=single
+python train_hydra.py scenario=sac_vs_sac environment.stage=multiple
+
+# Cross-algorithm training across stages
+python train_hydra.py scenario=ppo_pursuer_vs_dqn_evader environment.stage=open
+python train_hydra.py scenario=ppo_pursuer_vs_dqn_evader environment.stage=single
+python train_hydra.py scenario=ppo_pursuer_vs_dqn_evader environment.stage=multiple
+```
+
+### Alternative: Predefined Environment Configs
+```bash
+# These also work, but stage override is more flexible
+python train_hydra.py scenario=sac_vs_sac environment=open_stage
+python train_hydra.py scenario=sac_vs_sac environment=single_obstacle
+python train_hydra.py scenario=sac_vs_sac environment=pursuit_evasion
+```
+
+---
+
 ## Basic Algorithm Testing
 
 ### Pursuer vs Static/Simple Targets
