@@ -410,7 +410,7 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
             
             for k, v in actions.items():
                 agent_idx = self.agent_name_mapping[k]
-                x, y, z = self.compute_observation_by_id((agent_idx + 1) % NUM_AGENT)[-3:]
+                x, y, z = self.compute_attitude_by_id(agent_idx)[3]
                 dxdydz = self.actions[v]
 
                 next_x = x + dxdydz[0]
@@ -450,7 +450,8 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
                     observations[ag] = np.concatenate(
                         [
                             self.compute_observation_by_id(ag_id),
-                            self.compute_attitude_by_id((ag_id + 1) % NUM_AGENT)[3],
+                            self.compute_attitude_by_id((ag_id + 1) % NUM_AGENT)[3]
+                            - self.compute_attitude_by_id(ag_id)[3],
                         ]  # append pursuit and observation target
                     )
                 except Exception as e:
@@ -466,14 +467,6 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
                 for agent in self.agents
                 if not (terminations[agent] or truncations[agent])
             ]
-
-            # Transform other drone's position to relative position (reference frame: self)
-            for ag in self.agents:
-                ag_id = self.agent_name_mapping[ag]
-                left_ag_id = (ag_id - 1) % NUM_AGENT
-                left_ag = f"uav_{left_ag_id}"
-
-                observations[ag][-3:] -= self.prev_observations[left_ag][-3:]
 
             return observations, rewards, terminations, truncations, infos
         
@@ -563,7 +556,10 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
                     ag: np.concatenate(
                         [
                             self.compute_observation_by_id(self.agent_name_mapping[ag]),
-                            self.compute_attitude_by_id((self.agent_name_mapping[ag] + 1) % self.num_agents)[3],
+                            self.compute_attitude_by_id(
+                                (self.agent_name_mapping[ag] + 1) % self.num_agents
+                            )[3]
+                            - self.compute_attitude_by_id(self.agent_name_mapping[ag])[3],
                         ]  # append pursuit and observation target
                     )
                     for ag in self.agents
@@ -586,14 +582,6 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
             for agent_name, role in self.agent_roles.items():
                 role_info[agent_name] = role.name
             print(f"Agent roles: {role_info}")
-
-            # Transform other drone's position to relative position (reference frame: self)
-            for ag in self.agents:
-                ag_id = self.agent_name_mapping[ag]
-                left_ag_id = (ag_id - 1) % NUM_AGENT
-                left_ag = f"uav_{left_ag_id}"
-
-                observations[ag][-3:] -= self.prev_observations[left_ag][-3:]
 
             return observations, infos
         
