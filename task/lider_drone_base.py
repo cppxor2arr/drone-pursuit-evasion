@@ -265,10 +265,11 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
             [
                 lin_vel,  # Linear velocity (3D)
                 self.laycast(lin_pos, quaternion),  # LIDAR data
+                self.compute_attitude_by_id((agent_id + 1) % 2)[3]
+                - self.compute_attitude_by_id(agent_id)[3],
             ],
             axis=-1,
         )
-        
     
     def compute_distance_between_agents(self, agent_id: int, other_agent_id: int) -> float:
         """Compute the distance between two agents"""
@@ -534,18 +535,7 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
             infos[ag].update(info)
 
             # compute observations
-            try:
-                observations[ag] = np.concatenate(
-                    [
-                        self.compute_observation_by_id(ag_id),
-                        self.compute_attitude_by_id((ag_id + 1) % NUM_AGENT)[3]
-                        - self.compute_attitude_by_id(ag_id)[3],
-                    ]  # append pursuit and observation target
-                )
-            except Exception as e:
-                print(f"Error computing observations: {e}")
-                # Return a safe fallback observation
-                observations[ag] = np.zeros((6 + self.num_ray,), dtype=np.float64)
+            observations[ag] = self.compute_observation_by_id(ag_id)
                     
         # increment step count and cull dead agents for the next round
         self.prev_observations = observations.copy()
@@ -557,7 +547,6 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
         ]
 
         return observations, rewards, terminations, truncations, infos
-        
 
     def reset(
         self, seed=None, options=dict()
@@ -609,19 +598,9 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
         # Register all new bodies
         self.aviary.register_all_new_bodies()
 
-        NUM_AGENT = 2
-
         # Compute observations with target positions
         observations = {
-            ag: np.concatenate(
-                [
-                    self.compute_observation_by_id(self.agent_name_mapping[ag]),
-                    self.compute_attitude_by_id(
-                        (self.agent_name_mapping[ag] + 1) % self.num_agents
-                    )[3]
-                    - self.compute_attitude_by_id(self.agent_name_mapping[ag])[3],
-                ]  # append pursuit and observation target
-            )
+            ag: self.compute_observation_by_id(self.agent_name_mapping[ag])
             for ag in self.agents
         }
         
@@ -637,4 +616,3 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
         print(f"Agent roles: {role_info}")
 
         return observations, infos
-    
