@@ -427,15 +427,7 @@ def run_training_loop(config: DictConfig, env, agents: dict, agent_names: list, 
     episode_count = 0
     
     for global_step in range(config.training.total_timesteps):
-        actions = {}
-        
-        # Select actions for ALL agents using unified interface
-        for agent_name in obs.keys():
-            if agent_name in agents:
-                actions[agent_name] = agents[agent_name].select_action(obs[agent_name], training=True)
-            else:
-                # Fallback for missing agents
-                actions[agent_name] = env.action_space(agent_name).sample()
+        actions = {agent_name: agents[agent_name].select_action(obs[agent_name], training=True) for agent_name in obs.keys()}
         
         # Environment step
         next_obs, rewards, terminations, truncations, infos = env.step(actions)

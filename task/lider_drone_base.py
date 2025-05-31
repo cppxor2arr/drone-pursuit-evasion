@@ -132,7 +132,7 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
                 kwargs['start_orn'] = start_orn
         
         # Initialize base environment
-        super().__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs,flight_mode=7) ## DON"T CHANGE FLIGHT MODE
         self.num_possible_agents = len(drone_configs)
         self.possible_agents = [config.name for config in drone_configs]
         self.agent_name_mapping = dict(
@@ -140,11 +140,12 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
         )
 
         velocity_dim = 3
+        position_dim = 3  # ADDED: position information
         target_position = 3
         self._observation_space = spaces.Box(
             low=-np.inf,
             high=np.inf,
-            shape=(velocity_dim + target_position + self.num_ray,),
+            shape=(velocity_dim + position_dim + target_position + self.num_ray,),
             dtype=np.float64,
         )
         self.actions = Actions()
@@ -262,8 +263,9 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
 
             return np.concatenate(
                 [
-                    lin_vel,
-                    self.laycast(lin_pos, quaternion),
+                    lin_vel,    # Linear velocity (3D)
+                    lin_pos,    # Linear position (3D) - ADDED for altitude awareness
+                    self.laycast(lin_pos, quaternion),  # LIDAR data
                 ],
                 axis=-1,
             )
@@ -326,6 +328,15 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
         if current_distance < self.pursuer_proximity_threshold:
             reward += self.pursuer_proximity_coef * (self.pursuer_proximity_threshold - current_distance)
         
+        # ADDED: Altitude maintenance reward - penalize deviation from target altitude
+        try:
+            current_pos = self.aviary.state(agent_id)[-1]
+            altitude_deviation = abs(current_pos[2] - self.target_altitude)
+            altitude_penalty = -self.altitude_penalty_coef * altitude_deviation
+            reward += altitude_penalty
+        except Exception as e:
+            pass  # Skip altitude penalty if position unavailable
+        
         return reward, capture
     
     def compute_evader_reward(
@@ -367,6 +378,15 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
         # Bonus for maintaining safe distance
         if current_distance > self.evader_safe_distance:
             reward += self.evader_safe_distance_reward
+        
+        # ADDED: Altitude maintenance reward - penalize deviation from target altitude
+        try:
+            current_pos = self.aviary.state(agent_id)[-1]
+            altitude_deviation = abs(current_pos[2] - self.target_altitude)
+            altitude_penalty = -self.altitude_penalty_coef * altitude_deviation
+            reward += altitude_penalty
+        except Exception as e:
+            pass  # Skip altitude penalty if position unavailable
         
         return reward, capture
     
@@ -462,130 +482,92 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
         dict[str, bool],
         dict[str, dict[str, Any]],
     ]:
-        try:
-            NUM_AGENT = len(actions.items())
-            # 하나의 에이전트만 있는 경우를 확인하고 처리
-            if NUM_AGENT < 2:
-                # 하나의 에이전트만 있을 경우 에피소드를 종료시킵니다
-                observations = {}
-                rewards = {}
-                terminations = {}
-                truncations = {}
-                infos = {}
-                
-                for agent_name in list(actions.keys()):
-                    observations[agent_name] = np.zeros((6 + self.num_ray,), dtype=np.float64)
-                    rewards[agent_name] = 0.0
-                    terminations[agent_name] = True  # 에피소드 종료
-                    truncations[agent_name] = False
-                    infos[agent_name] = {"error": "Not enough agents"}
-                
-                return observations, rewards, terminations, truncations, infos
+        NUM_AGENT = len(actions.items())
+
+        #assert NUM_AGENT == 2, f"Expected 2 agents, got {NUM_AGENT}
+        for agent_name, action_input in actions.items():
+            agent_idx = self.agent_name_mapping[agent_name]
+            # Get THIS agent's current position, not the other agent's position
+            raw_state = self.compute_attitude_by_id(agent_idx)
+            ang_vel, ang_pos, lin_vel, lin_pos, quaternion = raw_state
+            x, y, z = lin_pos
             
-            assert NUM_AGENT == 2, f"Expected 2 agents, got {NUM_AGENT}"
+            # Handle different drone roles for action length only
+            drone_role = self.agent_roles.get(agent_name, DroneRole.PURSUER)  # Default to PURSUER if no role
             
-            for k, action_input in actions.items():
-                agent_idx = self.agent_name_mapping[k]
-                # x, y, z = self.compute_observation_by_id()[-3:]
-                raw_state = self.compute_attitude_by_id((agent_idx + 1) % NUM_AGENT)
-                ang_vel, ang_pos, lin_vel, lin_pos, quaternion = raw_state
-                x, y, z = lin_pos
-                # Use the provided action directly - no agent type checking needed
-                v = action_input
-                
-                # Handle different drone roles for action length only
-                agent_name = k
-                drone_role = self.agent_roles.get(agent_name, DroneRole.PURSUER)  # Default to PURSUER if no role
-                
-                # Get action length for this drone from config if available
-                action_length = 1.0
-                if self.drone_configs is not None:
-                    for config in self.drone_configs:
-                        if config.role == drone_role:
-                            action_length = config.action_length
-                            break
-                            
-                # Scale actions based on action_length
-                print(k, action_input)
-                print("x,y,z", x, y, z)
-                print(self.actions[v] * action_length)
-                dxdydz = self.actions[v] * action_length
+            drone_config = next(config for config in self.drone_configs if config.name == agent_name)
+            action_length = drone_config.action_length
+            
+            if drone_config.agent_type == AgentType.HOVERING:
+                next_x, next_y, next_z = drone_config.start_pos
+            else:
+                dxdydz = self.actions[action_input] * action_length
                 next_x = x + dxdydz[0]
                 next_y = y + dxdydz[1]
-                next_z = z + dxdydz[2] 
-                yaw_angle = 0 # I think, this can be a velocity
-                next_pose = np.array([next_x, next_y, yaw_angle, next_z])
-                print(next_pose,"agent_idx", agent_idx)
+                next_z = z + dxdydz[2]
 
-                self.aviary.set_setpoint(agent_idx, next_pose)
-
-            observations = dict()
-            terminations = {k: False for k in self.agents}
-            truncations = {k: False for k in self.agents}
-            rewards = {k: 0.0 for k in self.agents}
-            infos = {k: dict() for k in self.agents}
-
-            # step enough times for one RL step
-            for _ in range(self.env_step_ratio):
-                if self.aviary is not None:
-                    self.aviary.step()
-                self.update_states()
-
-            for ag in self.agents:
-                ag_id = self.agent_name_mapping[ag]
-                # compute term trunc reward
-                term, trunc, rew, info = self.compute_term_trunc_reward_info_by_id(
-                    ag_id, getattr(self, 'prev_observations', {})
-                )
-                terminations[ag] |= term
-                truncations[ag] |= trunc
-                rewards[ag] += rew
-                infos[ag].update(info)
-
-                # compute observations
-                try:
-                    observations[ag] = np.concatenate(
-                        [
-                            self.compute_observation_by_id(ag_id),
-                            self.compute_attitude_by_id((ag_id + 1) % NUM_AGENT)[3],
-                        ]  # append pursuit and observation target
-                    )
-                except Exception as e:
-                    print(f"Error computing observations: {e}")
-                    # Return a safe fallback observation
-                    observations[ag] = np.zeros((6 + self.num_ray,), dtype=np.float64)
-                        
-            # increment step count and cull dead agents for the next round
-            self.prev_observations = observations.copy()
-            self.step_count += 1
-            self.agents = [
-                agent
-                for agent in self.agents
-                if not (terminations[agent] or truncations[agent])
-            ]
-
-            # Transform other drone's position to relative position (reference frame: self)
-            for ag in self.agents:
-                ag_id = self.agent_name_mapping[ag]
-                left_ag_id = (ag_id - 1) % NUM_AGENT
-                left_ag = f"uav_{left_ag_id}"
-
-                # Check if the other agent exists in prev_observations
-                if left_ag in self.prev_observations and ag in observations:
-                    observations[ag][-3:] -= self.prev_observations[left_ag][-3:]
-
-            return observations, rewards, terminations, truncations, infos
-        
-        except Exception as e:
-            print(f"Error in step method: {e}")
-            # Return safe fallback values
-            observations = {agent: np.zeros((6 + self.num_ray,), dtype=np.float64) for agent in self.agents}
-            rewards = {agent: 0.0 for agent in self.agents}
-            terminations = {agent: True for agent in self.agents}  # End episode on error
-            truncations = {agent: False for agent in self.agents}
-            infos = {agent: {"error": str(e)} for agent in self.agents}
+            current_yaw = ang_pos[2]  # yaw is the Z component of angular position
+            next_pose = np.array([next_x, next_y, current_yaw, next_z])
             
-            return observations, rewards, terminations, truncations, infos
+            self.aviary.set_setpoint(agent_idx, next_pose)
+
+        observations = dict()
+        terminations = {agent_name: False for agent_name in self.agents}
+        truncations = {agent_name: False for agent_name in self.agents}
+        rewards = {agent_name: 0.0 for agent_name in self.agents}
+        infos = {agent_name: dict() for agent_name in self.agents}
+
+        # step enough times for one RL step
+        for _ in range(self.env_step_ratio):
+            if self.aviary is not None:
+                self.aviary.step()
+            self.update_states()
+
+        for ag in self.agents:
+            ag_id = self.agent_name_mapping[ag]
+            # compute term trunc reward
+            term, trunc, rew, info = self.compute_term_trunc_reward_info_by_id(
+                ag_id, getattr(self, 'prev_observations', {})
+            )
+            terminations[ag] |= term
+            truncations[ag] |= trunc
+            rewards[ag] += rew
+            infos[ag].update(info)
+
+            # compute observations
+            try:
+                observations[ag] = np.concatenate(
+                    [
+                        self.compute_observation_by_id(ag_id),
+                        self.compute_attitude_by_id((ag_id + 1) % NUM_AGENT)[3],
+                    ]  # append pursuit and observation target
+                )
+            except Exception as e:
+                print(f"Error computing observations: {e}")
+                # Return a safe fallback observation
+                observations[ag] = np.zeros((6 + self.num_ray,), dtype=np.float64)
+                    
+        # increment step count and cull dead agents for the next round
+        self.prev_observations = observations.copy()
+        self.step_count += 1
+        self.agents = [
+            agent
+            for agent in self.agents
+            if not (terminations[agent] or truncations[agent])
+        ]
+
+        # Transform other drone's position to relative position (reference frame: self)
+        for ag in self.agents:
+            ag_id = self.agent_name_mapping[ag]
+            left_ag_id = (ag_id - 1) % NUM_AGENT
+            left_ag = f"uav_{left_ag_id}"
+
+            # Check if the other agent exists in prev_observations
+            if left_ag in self.prev_observations and ag in observations:
+                observations[ag][-3:] -= self.prev_observations[left_ag][-3:]
+
+        return observations, rewards, terminations, truncations, infos
+        
 
     def reset(
         self, seed=None, options=dict()

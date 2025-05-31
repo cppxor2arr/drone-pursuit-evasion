@@ -64,6 +64,8 @@ environment:
   pursuer_proximity_threshold: 1.0
   pursuer_proximity_coef: 1.0
   time_reward_coef: 0.01
+  target_altitude: 1.0
+  altitude_penalty_coef: 0.1
 
 training:
   total_timesteps: 10000000
