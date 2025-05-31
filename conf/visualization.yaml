@@ -8,7 +8,7 @@ defaults:
 visualization:
   name: "Drone Pursuit-Evasion Demo"
   episodes: 3                    # Number of episodes to run
-  max_episode_steps: 100         # Maximum steps per episode (shorter for demo)
+  max_episode_steps: 100000         # Maximum steps per episode (shorter for demo)
   slow_motion: true              # Add delay for better visualization (ENABLED)
   pause_between_episodes: true   # Pause between episodes for manual control
   sleep_time: 0.05               # Time to sleep between steps (in seconds)
