@@ -259,13 +259,13 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
     def compute_observation_by_id(self, agent_id: int) -> np.ndarray:
         raw_state = self.compute_attitude_by_id(agent_id)
         ang_vel, ang_pos, lin_vel, lin_pos, quaternion = raw_state
+        other_lin_pos = self.compute_attitude_by_id((agent_id + 1) % 2)[3]
 
         return np.concatenate(
             [
                 lin_vel,  # Linear velocity (3D)
                 self.laycast(lin_pos, quaternion),  # LIDAR data
-                self.compute_attitude_by_id((agent_id + 1) % 2)[3]
-                - self.compute_attitude_by_id(agent_id)[3],
+                other_lin_pos - lin_pos,  # Other drone's relative position
             ],
             axis=-1,
         )
