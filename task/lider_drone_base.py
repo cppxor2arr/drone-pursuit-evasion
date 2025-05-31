@@ -258,17 +258,16 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
             return np.ones(self.num_ray) * self.lidar_reach  # Return max distances
 
     def compute_observation_by_id(self, agent_id: int) -> np.ndarray:
-            raw_state = self.compute_attitude_by_id(agent_id)
-            ang_vel, ang_pos, lin_vel, lin_pos, quaternion = raw_state
+        raw_state = self.compute_attitude_by_id(agent_id)
+        ang_vel, ang_pos, lin_vel, lin_pos, quaternion = raw_state
 
-            return np.concatenate(
-                [
-                    lin_vel,    # Linear velocity (3D)
-                    lin_pos,    # Linear position (3D) - ADDED for altitude awareness
-                    self.laycast(lin_pos, quaternion),  # LIDAR data
-                ],
-                axis=-1,
-            )
+        return np.concatenate(
+            [
+                lin_vel,  # Linear velocity (3D)
+                self.laycast(lin_pos, quaternion),  # LIDAR data
+            ],
+            axis=-1,
+        )
         
     
     def compute_distance_between_agents(self, agent_id: int, other_agent_id: int) -> float:
@@ -539,7 +538,8 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
                 observations[ag] = np.concatenate(
                     [
                         self.compute_observation_by_id(ag_id),
-                        self.compute_attitude_by_id((ag_id + 1) % NUM_AGENT)[3],
+                        self.compute_attitude_by_id((ag_id + 1) % NUM_AGENT)[3]
+                        - self.compute_attitude_by_id(ag_id)[3],
                     ]  # append pursuit and observation target
                 )
             except Exception as e:
@@ -555,16 +555,6 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
             for agent in self.agents
             if not (terminations[agent] or truncations[agent])
         ]
-
-        # Transform other drone's position to relative position (reference frame: self)
-        for ag in self.agents:
-            ag_id = self.agent_name_mapping[ag]
-            left_ag_id = (ag_id - 1) % NUM_AGENT
-            left_ag = f"uav_{left_ag_id}"
-
-            # Check if the other agent exists in prev_observations
-            if left_ag in self.prev_observations and ag in observations:
-                observations[ag][-3:] -= self.prev_observations[left_ag][-3:]
 
         return observations, rewards, terminations, truncations, infos
         
@@ -626,7 +616,10 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
             ag: np.concatenate(
                 [
                     self.compute_observation_by_id(self.agent_name_mapping[ag]),
-                    self.compute_attitude_by_id((self.agent_name_mapping[ag] + 1) % self.num_agents)[3],
+                    self.compute_attitude_by_id(
+                        (self.agent_name_mapping[ag] + 1) % self.num_agents
+                    )[3]
+                    - self.compute_attitude_by_id(self.agent_name_mapping[ag])[3],
                 ]  # append pursuit and observation target
             )
             for ag in self.agents
@@ -642,16 +635,6 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
         for agent_name, role in self.agent_roles.items():
             role_info[agent_name] = role.name
         print(f"Agent roles: {role_info}")
-
-        # Transform other drone's position to relative position (reference frame: self)
-        for ag in self.agents:
-            ag_id = self.agent_name_mapping[ag]
-            left_ag_id = (ag_id - 1) % NUM_AGENT
-            left_ag = f"uav_{left_ag_id}"
-
-            # Check if the other agent exists in prev_observations
-            if left_ag in self.prev_observations and ag in observations:
-                observations[ag][-3:] -= self.prev_observations[left_ag][-3:]
 
         return observations, infos
     
