@@ -270,7 +270,8 @@ def run_visualization(config: DictConfig):
                     actions[agent_name] = action
                 else:
                     actions[agent_name] = env.action_space(agent_name).sample()
-            
+            # print(actions)
+            # input()
             # Environment step
             next_obs, rewards, terminations, truncations, infos = env.step(actions)
             

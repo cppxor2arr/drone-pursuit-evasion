@@ -55,6 +55,7 @@ class Actions:
         self.norm = 1 / np.sqrt(3)
         self.length = length
         self.vectors = [
+            np.array([0, 0, 0]),  # Action 0: No movement (for hovering)
             np.array([+1, +1, +1]) * self.norm,
             np.array([+1, +1, -1]) * self.norm,
             np.array([+1, -1, +1]) * self.norm,
@@ -84,64 +85,37 @@ class Actions:
 class LidarDroneBaseEnv(MAQuadXHoverEnv):
     def __init__(
         self,
-        env_config=None,  # Environment configuration object
-        scenario_config=None,  # Scenario configuration object
-        # Legacy parameters for backward compatibility
-        lidar_reach: float = None,
-        num_ray: int = None,
-        angle_representations: str = "quaternion",
-        drone_configs: Optional[List[DroneConfig]] = None,
-        render_simulation: bool = None,
+        env_config,  # Environment configuration object
+        scenario_config,  # Scenario configuration object
+        drone_configs: Optional[List[DroneConfig]],
         *args,
         **kwargs,
     ):
-        # Handle config objects vs individual parameters
-        if env_config is not None:
-            # Use config objects (new approach)
-            self.lidar_reach = env_config.lidar_reach
-            self.num_ray = env_config.num_ray
-            self.render_simulation = env_config.render_simulation
-            self.environment_stage = EnvironmentStage(env_config.get('stage', 'multiple'))
-            
-            # Extract reward parameters from config
-            self.capture_threshold = env_config.get('capture_threshold', 0.1)
-            self.pursuer_capture_reward = env_config.get('pursuer_capture_reward', 20.0)
-            self.evader_capture_penalty = env_config.get('evader_capture_penalty', -10.0)
-            self.collision_penalty = env_config.get('collision_penalty', -30.0)
-            self.out_of_bounds_penalty = env_config.get('out_of_bounds_penalty', -30.0)
-            self.distance_reward_coef = env_config.get('distance_reward_coef', 2.0)
-            self.evader_survival_reward = env_config.get('evader_survival_reward', 0.1)
-            self.evader_safe_distance = env_config.get('evader_safe_distance', 2.0)
-            self.evader_safe_distance_reward = env_config.get('evader_safe_distance_reward', 0.5)
-            self.pursuer_proximity_threshold = env_config.get('pursuer_proximity_threshold', 1.0)
-            self.pursuer_proximity_coef = env_config.get('pursuer_proximity_coef', 1.0)
-            self.time_reward_coef = env_config.get('time_reward_coef', 0.01)
-            self.max_episode_steps = env_config.get('max_episode_steps', 500)
-            
-            # Get drone configs from scenario_config if available
-            if scenario_config is not None and hasattr(scenario_config, 'drones'):
-                drone_configs = self._create_drone_configs_from_scenario(scenario_config)
-        else:
-            # Use individual parameters (legacy approach)
-            self.lidar_reach = lidar_reach or 4.0
-            self.num_ray = num_ray or 20
-            self.render_simulation = render_simulation if render_simulation is not None else False
-            self.environment_stage = EnvironmentStage.MULTIPLE_OBSTACLES  # Default to current setting
-            
-            # Default reward parameters (legacy)
-            self.capture_threshold = 0.1
-            self.pursuer_capture_reward = 20.0
-            self.evader_capture_penalty = -10.0
-            self.collision_penalty = -30.0
-            self.out_of_bounds_penalty = -30.0
-            self.distance_reward_coef = 2.0
-            self.evader_survival_reward = 0.1
-            self.evader_safe_distance = 2.0
-            self.evader_safe_distance_reward = 0.5
-            self.pursuer_proximity_threshold = 1.0
-            self.pursuer_proximity_coef = 1.0
-            self.time_reward_coef = 0.01
-            self.max_episode_steps = 500
+        # Use config objects (new approach)
+        self.lidar_reach = env_config.lidar_reach
+        self.num_ray = env_config.num_ray
+        self.render_simulation = env_config.render_simulation
+        self.environment_stage = EnvironmentStage(env_config.get('stage', 'multiple'))
+        
+        # Extract reward parameters from config
+        self.capture_threshold = env_config.get('capture_threshold', 0.1)
+        self.pursuer_capture_reward = env_config.get('pursuer_capture_reward', 20.0)
+        self.evader_capture_penalty = env_config.get('evader_capture_penalty', -10.0)
+        self.collision_penalty = env_config.get('collision_penalty', -30.0)
+        self.out_of_bounds_penalty = env_config.get('out_of_bounds_penalty', -30.0)
+        self.distance_reward_coef = env_config.get('distance_reward_coef', 2.0)
+        self.evader_survival_reward = env_config.get('evader_survival_reward', 0.1)
+        self.evader_safe_distance = env_config.get('evader_safe_distance', 2.0)
+        self.evader_safe_distance_reward = env_config.get('evader_safe_distance_reward', 0.5)
+        self.pursuer_proximity_threshold = env_config.get('pursuer_proximity_threshold', 1.0)
+        self.pursuer_proximity_coef = env_config.get('pursuer_proximity_coef', 1.0)
+        self.time_reward_coef = env_config.get('time_reward_coef', 0.01)
+        self.max_episode_steps = env_config.get('max_episode_steps', 500)
+        
+        # Get drone configs from scenario_config if available
+        if scenario_config is not None and hasattr(scenario_config, 'drones'):
+            drone_configs = self._create_drone_configs_from_scenario(scenario_config)
+
 
         # Set render_mode based on render_simulation flag
         if not self.render_simulation and 'render_mode' in kwargs and kwargs['render_mode'] == 'human':
@@ -159,6 +133,11 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
         
         # Initialize base environment
         super().__init__(*args, **kwargs)
+        self.num_possible_agents = len(drone_configs)
+        self.possible_agents = [config.name for config in drone_configs]
+        self.agent_name_mapping = dict(
+            zip(self.possible_agents, list(range(len(self.possible_agents))))
+        )
 
         velocity_dim = 3
         target_position = 3
@@ -168,7 +147,7 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
             shape=(velocity_dim + target_position + self.num_ray,),
             dtype=np.float64,
         )
-        self.actions = Actions()# 1 10 5 3 7 # default ation length 1 
+        self.actions = Actions()
         self._action_space = spaces.Discrete(len(self.actions))
         
         # Store drone configurations
@@ -278,7 +257,6 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
             return np.ones(self.num_ray) * self.lidar_reach  # Return max distances
 
     def compute_observation_by_id(self, agent_id: int) -> np.ndarray:
-        try:
             raw_state = self.compute_attitude_by_id(agent_id)
             ang_vel, ang_pos, lin_vel, lin_pos, quaternion = raw_state
 
@@ -289,10 +267,7 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
                 ],
                 axis=-1,
             )
-        except Exception as e:
-            print(f"Error computing observation for agent {agent_id}: {e}")
-            # Return a safe fallback observation with the correct shape
-            return np.zeros((3 + self.num_ray,), dtype=np.float64)
+        
     
     def compute_distance_between_agents(self, agent_id: int, other_agent_id: int) -> float:
         """Compute the distance between two agents"""
@@ -509,34 +484,18 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
             
             assert NUM_AGENT == 2, f"Expected 2 agents, got {NUM_AGENT}"
             
-            for k, v in actions.items():
+            for k, action_input in actions.items():
                 agent_idx = self.agent_name_mapping[k]
-                x, y, z = self.compute_observation_by_id((agent_idx + 1) % NUM_AGENT)[-3:]
+                # x, y, z = self.compute_observation_by_id()[-3:]
+                raw_state = self.compute_attitude_by_id((agent_idx + 1) % NUM_AGENT)
+                ang_vel, ang_pos, lin_vel, lin_pos, quaternion = raw_state
+                x, y, z = lin_pos
+                # Use the provided action directly - no agent type checking needed
+                v = action_input
                 
-                # Handle different drone roles
+                # Handle different drone roles for action length only
                 agent_name = k
                 drone_role = self.agent_roles.get(agent_name, DroneRole.PURSUER)  # Default to PURSUER if no role
-
-                # Get agent type from drone config
-                agent_type = None
-                if self.drone_configs is not None:
-                    for config in self.drone_configs:
-                        if config.role == drone_role:
-                            agent_type = config.agent_type
-                            break
-                
-                # For HOVER role, don't move
-                if agent_type == AgentType.HOVERING:
-                    # Set target position as current position for hovering
-                    current_pos = self.aviary.state(agent_idx)[-1]
-                    current_yaw = 0.0  # Use default yaw
-                    next_pose = np.array([current_pos[0], current_pos[1], current_yaw, current_pos[2]])
-                    self.aviary.set_setpoint(agent_idx, next_pose)
-                    continue  # Skip the rest of the processing for hovering drones
-                    
-                # For RANDOM role, choose a random action
-                if agent_type == AgentType.RANDOM:
-                    v = np.random.randint(0, len(self.actions))
                 
                 # Get action length for this drone from config if available
                 action_length = 1.0
@@ -547,14 +506,16 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
                             break
                             
                 # Scale actions based on action_length
+                print(k, action_input)
+                print("x,y,z", x, y, z)
+                print(self.actions[v] * action_length)
                 dxdydz = self.actions[v] * action_length
-
                 next_x = x + dxdydz[0]
                 next_y = y + dxdydz[1]
-                next_z = z + dxdydz[2]
-
-                yaw_angle = 1.0
+                next_z = z + dxdydz[2] 
+                yaw_angle = 0 # I think, this can be a velocity
                 next_pose = np.array([next_x, next_y, yaw_angle, next_z])
+                print(next_pose,"agent_idx", agent_idx)
 
                 self.aviary.set_setpoint(agent_idx, next_pose)
 
@@ -629,102 +590,86 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
     def reset(
         self, seed=None, options=dict()
     ) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
-        try:
-            observations, infos = super().reset(seed, options)
+        observations, infos = super().reset(seed, options)
 
-            # Use absolute path for mesh file
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            mesh_file = os.path.join(os.path.dirname(script_dir), "hi_res_sphere.obj")
-            
-            # Create dome boundaries
-            concaveSphereCollisionId = self.aviary.createCollisionShape(
-                shapeType=p.GEOM_MESH,
-                fileName=mesh_file,
-                meshScale=[-self.flight_dome_size] * 3,
-                flags=p.GEOM_FORCE_CONCAVE_TRIMESH,
-            )
-            concaveSphereVisualId = self.aviary.createVisualShape(
-                shapeType=p.GEOM_MESH,
-                fileName=mesh_file,
-                meshScale=[-self.flight_dome_size] * 3,
-                rgbaColor=[0.2, 0.2, 1.0, 0.8],
-                specularColor=[0.4, 0.4, 0.4],
-            )
-            concaveSphereId = self.aviary.createMultiBody(
-                baseMass=0,
-                baseCollisionShapeIndex=concaveSphereCollisionId,
-                baseVisualShapeIndex=concaveSphereVisualId,
-                basePosition=[0.0, 0.0, 0.0],
-                useMaximalCoordinates=True,
-            )
-            convexSphereVisualId = self.aviary.createVisualShape(
-                shapeType=p.GEOM_MESH,
-                fileName=mesh_file,
-                meshScale=[self.flight_dome_size] * 3,
-                rgbaColor=[0.2, 0.2, 1.0, 0.8],
-                specularColor=[0.4, 0.4, 0.4],
-            )
-            convexSphereId = self.aviary.createMultiBody(
-                baseMass=0,
-                baseVisualShapeIndex=convexSphereVisualId,
-                basePosition=[0.0, 0.0, 0.0],
-                useMaximalCoordinates=True,
-            )
-            
-            # Create obstacles based on environment stage
-            self.create_obstacles()
-            
-            # Register all new bodies
-            self.aviary.register_all_new_bodies()
-
-            NUM_AGENT = 2
-
-            try:
-                # Compute observations with target positions
-                observations = {
-                    ag: np.concatenate(
-                        [
-                            self.compute_observation_by_id(self.agent_name_mapping[ag]),
-                            self.compute_attitude_by_id((self.agent_name_mapping[ag] + 1) % self.num_agents)[3],
-                        ]  # append pursuit and observation target
-                    )
-                    for ag in self.agents
-                }
-            except Exception as e:
-                print(f"Error computing initial observations: {e}")
-                # Return safe fallback observations
-                observations = {
-                    ag: np.zeros((6 + self.num_ray,), dtype=np.float64)
-                    for ag in self.agents
-                }
-            
-            self.prev_observations = observations.copy()
-            
-            # Assign agent roles based on configuration
-            self.assign_agent_roles()
-            
-            # Log the roles
-            role_info = {}
-            for agent_name, role in self.agent_roles.items():
-                role_info[agent_name] = role.name
-            print(f"Agent roles: {role_info}")
-
-            # Transform other drone's position to relative position (reference frame: self)
-            for ag in self.agents:
-                ag_id = self.agent_name_mapping[ag]
-                left_ag_id = (ag_id - 1) % NUM_AGENT
-                left_ag = f"uav_{left_ag_id}"
-
-                # Check if the other agent exists in prev_observations
-                if left_ag in self.prev_observations and ag in observations:
-                    observations[ag][-3:] -= self.prev_observations[left_ag][-3:]
-
-            return observations, infos
+        # Use absolute path for mesh file
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        mesh_file = os.path.join(os.path.dirname(script_dir), "hi_res_sphere.obj")
         
-        except Exception as e:
-            print(f"Error in reset method: {e}")
-            # Return safe fallback values
-            observations = {agent: np.zeros((6 + self.num_ray,), dtype=np.float64) for agent in self.agents}
-            infos = {"error": str(e)}
-            
-            return observations, infos
+        # Create dome boundaries
+        concaveSphereCollisionId = self.aviary.createCollisionShape(
+            shapeType=p.GEOM_MESH,
+            fileName=mesh_file,
+            meshScale=[-self.flight_dome_size] * 3,
+            flags=p.GEOM_FORCE_CONCAVE_TRIMESH,
+        )
+        concaveSphereVisualId = self.aviary.createVisualShape(
+            shapeType=p.GEOM_MESH,
+            fileName=mesh_file,
+            meshScale=[-self.flight_dome_size] * 3,
+            rgbaColor=[0.2, 0.2, 1.0, 0.8],
+            specularColor=[0.4, 0.4, 0.4],
+        )
+        concaveSphereId = self.aviary.createMultiBody(
+            baseMass=0,
+            baseCollisionShapeIndex=concaveSphereCollisionId,
+            baseVisualShapeIndex=concaveSphereVisualId,
+            basePosition=[0.0, 0.0, 0.0],
+            useMaximalCoordinates=True,
+        )
+        convexSphereVisualId = self.aviary.createVisualShape(
+            shapeType=p.GEOM_MESH,
+            fileName=mesh_file,
+            meshScale=[self.flight_dome_size] * 3,
+            rgbaColor=[0.2, 0.2, 1.0, 0.8],
+            specularColor=[0.4, 0.4, 0.4],
+        )
+        convexSphereId = self.aviary.createMultiBody(
+            baseMass=0,
+            baseVisualShapeIndex=convexSphereVisualId,
+            basePosition=[0.0, 0.0, 0.0],
+            useMaximalCoordinates=True,
+        )
+        
+        # Create obstacles based on environment stage
+        self.create_obstacles()
+        
+        # Register all new bodies
+        self.aviary.register_all_new_bodies()
+
+        NUM_AGENT = 2
+
+        # Compute observations with target positions
+        observations = {
+            ag: np.concatenate(
+                [
+                    self.compute_observation_by_id(self.agent_name_mapping[ag]),
+                    self.compute_attitude_by_id((self.agent_name_mapping[ag] + 1) % self.num_agents)[3],
+                ]  # append pursuit and observation target
+            )
+            for ag in self.agents
+        }
+        
+        self.prev_observations = observations.copy()
+        
+        # Assign agent roles based on configuration
+        self.assign_agent_roles()
+        
+        # Log the roles
+        role_info = {}
+        for agent_name, role in self.agent_roles.items():
+            role_info[agent_name] = role.name
+        print(f"Agent roles: {role_info}")
+
+        # Transform other drone's position to relative position (reference frame: self)
+        for ag in self.agents:
+            ag_id = self.agent_name_mapping[ag]
+            left_ag_id = (ag_id - 1) % NUM_AGENT
+            left_ag = f"uav_{left_ag_id}"
+
+            # Check if the other agent exists in prev_observations
+            if left_ag in self.prev_observations and ag in observations:
+                observations[ag][-3:] -= self.prev_observations[left_ag][-3:]
+
+        return observations, infos
+    
