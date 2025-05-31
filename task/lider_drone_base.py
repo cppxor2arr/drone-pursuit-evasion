@@ -140,12 +140,11 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
         )
 
         velocity_dim = 3
-        position_dim = 3  # ADDED: position information
-        target_position = 3
+        relative_position = 3
         self._observation_space = spaces.Box(
             low=-np.inf,
             high=np.inf,
-            shape=(velocity_dim + position_dim + target_position + self.num_ray,),
+            shape=(velocity_dim + self.num_ray + relative_position,),
             dtype=np.float64,
         )
         self.actions = Actions()
@@ -545,8 +544,14 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
             for agent in self.agents
             if not (terminations[agent] or truncations[agent])
         ]
+        # If any agent terminated, terminate all remaining agents
+        if any(terminations.values()):
+            for agent in self.agents:
+                terminations[agent] = True
+                infos[agent]["forced_termination"] = True
 
         return observations, rewards, terminations, truncations, infos
+        
 
     def reset(
         self, seed=None, options=dict()
