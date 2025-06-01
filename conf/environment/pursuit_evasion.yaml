@@ -26,4 +26,8 @@ environment:
   evader_safe_distance_reward: 0.5
   pursuer_proximity_threshold: 1.0
   pursuer_proximity_coef: 1.0
-  time_reward_coef: 0.01 
+  time_reward_coef: 0.01
+  
+  # Altitude maintenance parameters
+  target_altitude: 1.0
+  altitude_penalty_coef: 0.1 

@@ -112,6 +112,13 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
         self.time_reward_coef = env_config.get('time_reward_coef', 0.01)
         self.max_episode_steps = env_config.get('max_episode_steps', 500)
         
+        # Add missing altitude parameters
+        self.target_altitude = env_config.get('target_altitude', 1.0)
+        self.altitude_penalty_coef = env_config.get('altitude_penalty_coef', 0.1)
+        
+        # Initialize step counter
+        self.step_count = 0
+        
         # Get drone configs from scenario_config if available
         if scenario_config is not None and hasattr(scenario_config, 'drones'):
             drone_configs = self._create_drone_configs_from_scenario(scenario_config)
@@ -155,6 +162,9 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
         
         # Agent roles will be initialized on reset
         self.agent_roles = {}
+        
+        # Initialize distance tracking for reward computation
+        self.prev_agent_positions = {}
 
     def _create_drone_configs_from_scenario(self, scenario_config):
         """Create DroneConfig objects from scenario configuration"""
@@ -240,16 +250,12 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
 
 
         NUM_THREAD = 1
-        try:
-            ray_results = p.rayTestBatch(ray_from, ray_to, NUM_THREAD)
-            distances = [
-                normalized_dist * self.lidar_reach
-                for ray_id, body_id, normalized_dist, xyz, direction in ray_results
-            ]
-            return np.array(distances)
-        except (TypeError, AttributeError):
-            # Handle the case where p might be None or rayTestBatch fails
-            return np.ones(self.num_ray) * self.lidar_reach  # Return max distances
+        ray_results = p.rayTestBatch(ray_from, ray_to, NUM_THREAD)
+        distances = [
+            normalized_dist * self.lidar_reach
+            for ray_id, body_id, normalized_dist, xyz, direction in ray_results
+        ]
+        return np.array(distances)
 
     def compute_observation_by_id(self, agent_id: int) -> np.ndarray:
         raw_state = self.compute_attitude_by_id(agent_id)
@@ -267,30 +273,23 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
     
     def compute_distance_between_agents(self, agent_id: int, other_agent_id: int) -> float:
         """Compute the distance between two agents"""
-        try:
-            linear_pos = self.aviary.state(agent_id)[-1]
-            other_linear_pos = self.aviary.state(other_agent_id)[-1]
-            return np.linalg.norm(other_linear_pos - linear_pos)
-        except Exception as e:
-            print(f"Error computing distance between agents: {e}")
-            return float('inf')  # Return a large distance on error
+        linear_pos = self.aviary.state(agent_id)[-1]
+        other_linear_pos = self.aviary.state(other_agent_id)[-1]
+        return np.linalg.norm(other_linear_pos - linear_pos)
     
     def compute_prev_distance_between_agents(self, agent_id: int, other_agent_id: int) -> float:
-        """Compute the previous distance between two agents using prev_observations"""
-        agent_name = f"uav_{agent_id}"
-        other_agent_name = f"uav_{other_agent_id}"
+        """Compute the previous distance between two agents using stored positions"""
         
-        if not hasattr(self, 'prev_observations') or agent_name not in self.prev_observations or other_agent_name not in self.prev_observations:
-            # If previous observations are not available, return current distance
-            return self.compute_distance_between_agents(agent_id, other_agent_id)
-        
-        try:
-            prev_linear_pos = self.prev_observations[other_agent_name][-3:]
-            prev_other_linear_pos = self.prev_observations[agent_name][-3:]
-            return np.linalg.norm(prev_other_linear_pos - prev_linear_pos)
-        except Exception as e:
-            print(f"Error computing previous distance: {e}")
-            return float('inf')
+        # Check if we have previous positions stored
+        if agent_id in self.prev_agent_positions and other_agent_id in self.prev_agent_positions:
+            prev_pos_1 = self.prev_agent_positions[agent_id]
+            prev_pos_2 = self.prev_agent_positions[other_agent_id]
+            prev_distance = np.linalg.norm(prev_pos_2 - prev_pos_1)
+            return prev_distance
+        else:
+            # If no previous positions available, return current distance (no reward/penalty)
+            current_dist = self.compute_distance_between_agents(agent_id, other_agent_id)
+            return current_dist
     
     def compute_pursuer_reward(
         self, agent_id: int, other_agent_id: int, collision: bool, out_of_bounds: bool
@@ -316,20 +315,19 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
             reward += self.pursuer_capture_reward
         
         # Distance-based reward (reward for getting closer)
-        reward += self.distance_reward_coef * (prev_distance - current_distance)
+        distance_reward = self.distance_reward_coef * (prev_distance - current_distance)
+        reward += distance_reward
         
         # Proximity reward (more reward as pursuer gets closer)
         if current_distance < self.pursuer_proximity_threshold:
-            reward += self.pursuer_proximity_coef * (self.pursuer_proximity_threshold - current_distance)
+            proximity_reward = self.pursuer_proximity_coef * (self.pursuer_proximity_threshold - current_distance)
+            reward += proximity_reward
         
         # ADDED: Altitude maintenance reward - penalize deviation from target altitude
-        try:
-            current_pos = self.aviary.state(agent_id)[-1]
-            altitude_deviation = abs(current_pos[2] - self.target_altitude)
-            altitude_penalty = -self.altitude_penalty_coef * altitude_deviation
-            reward += altitude_penalty
-        except Exception as e:
-            pass  # Skip altitude penalty if position unavailable
+        current_pos = self.aviary.state(agent_id)[-1]
+        altitude_deviation = abs(current_pos[2] - self.target_altitude)
+        altitude_penalty = -self.altitude_penalty_coef * altitude_deviation
+        reward += altitude_penalty
         
         return reward, capture
     
@@ -374,13 +372,10 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
             reward += self.evader_safe_distance_reward
         
         # ADDED: Altitude maintenance reward - penalize deviation from target altitude
-        try:
-            current_pos = self.aviary.state(agent_id)[-1]
-            altitude_deviation = abs(current_pos[2] - self.target_altitude)
-            altitude_penalty = -self.altitude_penalty_coef * altitude_deviation
-            reward += altitude_penalty
-        except Exception as e:
-            pass  # Skip altitude penalty if position unavailable
+        current_pos = self.aviary.state(agent_id)[-1]
+        altitude_deviation = abs(current_pos[2] - self.target_altitude)
+        altitude_penalty = -self.altitude_penalty_coef * altitude_deviation
+        reward += altitude_penalty
         
         return reward, capture
     
@@ -401,69 +396,64 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
         # initialize
         reward = 0.0
         term = False
-        trunc = self.step_count > self.max_steps
+        trunc = self.step_count > self.max_episode_steps
         info = dict()
 
-        try:
-            # collision check
-            if self.aviary and hasattr(self.aviary, 'contact_array') and hasattr(self.aviary, 'drones'):
-                collision = np.any(self.aviary.contact_array[self.aviary.drones[agent_id].Id])
-                if collision:
-                    info["collision"] = True
-                    term |= True
+        # collision check
+        if self.aviary and hasattr(self.aviary, 'contact_array') and hasattr(self.aviary, 'drones'):
+            collision = np.any(self.aviary.contact_array[self.aviary.drones[agent_id].Id])
+            if collision:
+                info["collision"] = True
+                term |= True
 
-            # exceed flight dome check
-            if self.aviary:
-                agent_pos = self.aviary.state(agent_id)[-1]
-                out_of_bounds = np.linalg.norm(agent_pos) > self.flight_dome_size
-                if out_of_bounds:
-                    info["out_of_bounds"] = True
-                    term |= True
-            else:
-                out_of_bounds = False
+        # exceed flight dome check
+        if self.aviary:
+            agent_pos = self.aviary.state(agent_id)[-1]
+            out_of_bounds = np.linalg.norm(agent_pos) > self.flight_dome_size
+            if out_of_bounds:
+                info["out_of_bounds"] = True
+                term |= True
+        else:
+            out_of_bounds = False
 
-            # Get the other agent ID (assuming 2 agents)
-            other_agent_id = 1 if agent_id == 0 else 0
+        # Get the other agent ID (assuming 2 agents)
+        other_agent_id = 1 if agent_id == 0 else 0
+        
+        # Assign roles if not already assigned
+        if len(self.agent_roles) == 0:
+            self.assign_agent_roles()
+        
+        agent_name = [name for name, id in self.agent_name_mapping.items() if id == agent_id][0]
+        
+        # Compute role-based rewards
+        if agent_name in self.agent_roles:
+            if self.agent_roles[agent_name] == DroneRole.PURSUER:
+                reward, capture = self.compute_pursuer_reward(agent_id, other_agent_id, collision, out_of_bounds)
+            else:  # EVADER
+                reward, capture = self.compute_evader_reward(agent_id, other_agent_id, collision, out_of_bounds)
             
-            # Assign roles if not already assigned
-            if len(self.agent_roles) == 0:
-                self.assign_agent_roles()
+            # Add capture information to info
+            if capture:
+                info["capture"] = True
+                term |= True  # End episode on capture
+        else:
+            # Fallback to basic reward
+            linear_distance = self.compute_distance_between_agents(agent_id, other_agent_id)
             
-            agent_name = [name for name, id in self.agent_name_mapping.items() if id == agent_id][0]
+            # Basic penalties
+            if collision:
+                reward -= 10.0
+            if out_of_bounds:
+                reward -= 10.0
             
-            # Compute role-based rewards
-            if agent_name in self.agent_roles:
-                if self.agent_roles[agent_name] == DroneRole.PURSUER:
-                    reward, capture = self.compute_pursuer_reward(agent_id, other_agent_id, collision, out_of_bounds)
-                else:  # EVADER
-                    reward, capture = self.compute_evader_reward(agent_id, other_agent_id, collision, out_of_bounds)
-                
-                # Add capture information to info
-                if capture:
-                    info["capture"] = True
-                    term |= True  # End episode on capture
-            else:
-                # Fallback to basic reward
-                linear_distance = self.compute_distance_between_agents(agent_id, other_agent_id)
-                
-                # Basic penalties
-                if collision:
+            # Basic capture reward/penalty
+            if linear_distance < self.capture_threshold:
+                if agent_id == 0:  # Assume pursuer is agent 0
+                    reward += 10.0
+                else:  # Assume evader is agent 1
                     reward -= 10.0
-                if out_of_bounds:
-                    reward -= 10.0
-                
-                # Basic capture reward/penalty
-                if linear_distance < self.capture_threshold:
-                    if agent_id == 0:  # Assume pursuer is agent 0
-                        reward += 10.0
-                    else:  # Assume evader is agent 1
-                        reward -= 10.0
-                    info["capture"] = True
-                    term |= True
-        except Exception as e:
-            print(f"Error in compute_term_trunc_reward_info_by_id: {e}")
-            # In case of error, return safe values
-            info["error"] = str(e)
+                info["capture"] = True
+                term |= True
 
         return term, trunc, reward, info
 
@@ -534,6 +524,13 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
         # increment step count and cull dead agents for the next round
         self.prev_observations = observations.copy()
         self.step_count += 1
+        
+        # Store current agent positions for next step's distance calculation
+        for ag in self.agents:
+            agent_id = self.agent_name_mapping[ag]
+            current_pos = self.aviary.state(agent_id)[-1]  # Get position [x, y, z]
+            self.prev_agent_positions[agent_id] = current_pos.copy()
+        
         self.agents = [
             agent
             for agent in self.agents
