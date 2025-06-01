@@ -238,11 +238,6 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
             for d_theta in range(self.num_ray)
         ]
 
-        # # Visualize rays if simulation is rendered
-        # if self.render_simulation:
-        #     line_color = [0, 1, 0]
-        #     for i in range(self.num_ray):
-        #         p.addUserDebugLine(ray_from[i], ray_to[i], line_color, lifeTime=0.1)
 
         NUM_THREAD = 1
         try:
@@ -555,32 +550,6 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
     def reset(
         self, seed=None, options=dict()
     ) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
-        self.start_pos = np.array(
-            [
-                np.append(
-                    np.random.uniform(
-                        -self.flight_dome_size / 3**0.5,
-                        self.flight_dome_size / 3**0.5,
-                        2,
-                    ),
-                    np.random.uniform(
-                        0.1,
-                        self.flight_dome_size / 3**0.5,
-                    ),
-                ),
-                np.append(
-                    np.random.uniform(
-                        -self.flight_dome_size / 3**0.5,
-                        self.flight_dome_size / 3**0.5,
-                        2,
-                    ),
-                    np.random.uniform(
-                        0.1,
-                        self.flight_dome_size / 3**0.5,
-                    ),
-                ),
-            ]
-        )
         observations, infos = super().reset(seed, options)
 
         # Use absolute path for mesh file

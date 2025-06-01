@@ -526,7 +526,7 @@ def log_episode_results(config: DictConfig, episode_rewards: dict, env, episode_
             })
 
 
-@hydra.main(version_base=None, config_path="conf", config_name="config")
+@hydra.main(version_base=None, config_path="conf", config_name="training")
 def train(config: DictConfig) -> None:
     
     # Setup training
