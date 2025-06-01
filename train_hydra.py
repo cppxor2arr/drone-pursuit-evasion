@@ -11,6 +11,7 @@ from typing import Tuple
 
 from task.lider_drone_base import LidarDroneBaseEnv, DroneRole, DroneConfig, AgentType
 from RL import DroneDQNAgent, ReplayBuffer, DronePPOAgent, RandomAgent, HoveringAgent, DroneSACAgent
+from agent_factory import create_agent
 
 
 def set_seed(seed: int):
@@ -27,92 +28,6 @@ def setup_device(device_config: str) -> str:
     if device_config == "auto":
         return "cuda" if torch.cuda.is_available() else "cpu"
     return device_config
-
-
-def create_agent(agent_type: str, config: DictConfig, obs_space, act_space, device: str):
-    """Create agent based on type specified in scenario"""
-    from RL import DroneDQNAgent, DronePPOAgent, DroneSACAgent, RandomAgent, HoveringAgent
-    
-    # Convert string to enum if needed
-    if isinstance(agent_type, str):
-        agent_type = AgentType(agent_type)
-    
-    if agent_type == AgentType.DQN:
-        # Use agent config if available, otherwise create default
-        if hasattr(config, 'agent') and config.agent is not None:
-            agent_config = OmegaConf.create({
-                "gamma": getattr(config.agent, 'gamma', 0.99),
-                "learning_rate": getattr(config.agent, 'learning_rate', 0.0005),
-                "epsilon_start": getattr(config.agent, 'epsilon_start', 1.0),
-                "epsilon_end": getattr(config.agent, 'epsilon_end', 0.05),
-                "epsilon_decay": getattr(config.agent, 'epsilon_decay', 900000),
-                "batch_size": getattr(config.agent, 'batch_size', 64),
-                "network": getattr(config.agent, 'network', {"hidden_dims": [120, 84, 84]}),
-                "buffer_size": getattr(config.agent, 'buffer_size', 100000),
-                "target_update_interval": getattr(config.agent, 'target_update_interval', 1000),
-                "soft_update_tau": getattr(config.agent, 'soft_update_tau', 0.005)
-            })
-        else:
-            # Default DQN config
-            agent_config = OmegaConf.create({
-                "gamma": 0.99,
-                "learning_rate": 0.0005,
-                "epsilon_start": 1.0,
-                "epsilon_end": 0.05,
-                "epsilon_decay": 900000,
-                "batch_size": 64,
-                "network": {"hidden_dims": [120, 84, 84]},
-                "buffer_size": 100000,
-                "target_update_interval": 1000,
-                "soft_update_tau": 0.005
-            })
-        return DroneDQNAgent(obs_space, act_space, agent_config, device)
-    
-    elif agent_type == AgentType.PPO:
-        # Use PPO config if available, otherwise create default
-        ppo_config = getattr(config, 'ppo', None)
-        if ppo_config is None:
-            ppo_config = OmegaConf.create({
-                "gamma": 0.99,
-                "learning_rate": 0.0003,
-                "clip_range": 0.2,
-                "value_coef": 0.5,
-                "entropy_coef": 0.01,
-                "gae_lambda": 0.95,
-                "max_grad_norm": 0.5,
-                "ppo_epochs": 10,
-                "batch_size": 256,
-                "buffer_size": 2048,
-                "network": {"hidden_dims": [256, 256]}
-            })
-        return DronePPOAgent(obs_space, act_space, ppo_config, device)
-    
-    elif agent_type == AgentType.SAC:
-        # Use SAC config if available, otherwise create default
-        sac_config = getattr(config, 'sac', None)
-        if sac_config is None:
-            sac_config = OmegaConf.create({
-                "gamma": 0.99,
-                "learning_rate": 0.0003,
-                "tau": 0.005,
-                "alpha": 0.2,
-                "automatic_entropy_tuning": True,
-                "target_update_interval": 1,
-                "batch_size": 256,
-                "buffer_size": 100000,
-                "warmup_steps": 1000,
-                "network": {"hidden_dims": [256, 256]}
-            })
-        return DroneSACAgent(obs_space, act_space, sac_config, device)
-    
-    elif agent_type == AgentType.RANDOM:
-        return RandomAgent(obs_space, act_space, device)
-    
-    elif agent_type == AgentType.HOVERING:
-        return HoveringAgent(obs_space, act_space, device)
-    
-    else:
-        raise ValueError(f"Unknown agent type: {agent_type}")
 
 
 def setup_wandb(config: DictConfig, run_name: str):
@@ -402,7 +317,6 @@ def run_training_loop(config: DictConfig, env, agents: dict, agent_names: list, 
         
         # Environment step
         next_obs, rewards, terminations, truncations, infos = env.step(actions)
-        
         # Process experiences for ALL agents
         for agent_name in agent_names:
             if agent_name in obs and agent_name in next_obs and agent_name in agents:
@@ -423,12 +337,31 @@ def run_training_loop(config: DictConfig, env, agents: dict, agent_names: list, 
                 
                 # Log metrics for trainable agents
                 if global_step % config.training.log_interval == 0 and config.wandb.mode != "disabled":
-
+                    # Only log meaningful metrics (non-zero or informational)
                     for metric_name, metric_value in metrics.items():
+                        # Skip zero loss metrics unless they are informational                        
                         wandb.log({
                             f"train/{agent_name}_{metric_name}": metric_value,
                             "global_step": global_step
                         })
+                    
+                    # Add buffer status for PPO agents
+                    if hasattr(agents[agent_name], 'buffer'):
+                        buffer_fill = len(agents[agent_name].buffer) / agents[agent_name].buffer.capacity
+                        wandb.log({
+                            f"train/{agent_name}_buffer_fill": buffer_fill,
+                            "global_step": global_step
+                        })
+                
+                # Log whenever actual training occurs (non-zero losses)
+                if any(metrics.get(key, 0) != 0 for key in ['loss', 'actor_loss', 'critic_loss']) and config.wandb.mode != "disabled":
+                    for metric_name, metric_value in metrics.items():
+                        if metric_name in ['loss', 'actor_loss', 'critic_loss', 'entropy']:
+                            wandb.log({
+                                f"train/{agent_name}_{metric_name}": metric_value,
+                                f"train/{agent_name}_training_step": global_step,
+                                "global_step": global_step
+                            })
             elif agent_name in episode_rewards:
                 # Still track episode rewards for missing agents
                 episode_rewards[agent_name] += rewards.get(agent_name, 0)

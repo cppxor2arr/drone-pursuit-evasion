@@ -14,6 +14,7 @@ import time
 
 from task.lider_drone_base import LidarDroneBaseEnv, DroneRole, DroneConfig, AgentType
 from RL import DroneDQNAgent, DronePPOAgent, DroneSACAgent, RandomAgent, HoveringAgent
+from agent_factory import create_agent
 
 
 def setup_device(device_config: str) -> str:
@@ -21,72 +22,6 @@ def setup_device(device_config: str) -> str:
     if device_config == "auto":
         return "cuda" if torch.cuda.is_available() else "cpu"
     return device_config
-
-
-def create_agent(agent_type: str, config: DictConfig, obs_space, act_space, device: str):
-    """Create agent based on type specified in scenario"""
-    from RL import DroneDQNAgent, DronePPOAgent, DroneSACAgent, RandomAgent, HoveringAgent
-    
-    # Convert string to enum if needed
-    if isinstance(agent_type, str):
-        agent_type = AgentType(agent_type)
-    
-    if agent_type == AgentType.DQN:
-        agent_config = OmegaConf.create({
-            "gamma": config.agent.gamma,
-            "learning_rate": config.agent.learning_rate,
-            "epsilon_start": 0.0,  # No exploration during visualization
-            "epsilon_end": 0.0,
-            "epsilon_decay": 1,
-            "batch_size": config.agent.batch_size,
-            "network": config.agent.network,
-            "buffer_size": config.agent.buffer_size
-        })
-        return DroneDQNAgent(obs_space, act_space, agent_config, device)
-    
-    elif agent_type == AgentType.PPO:
-        ppo_config = getattr(config, 'ppo', None)
-        if ppo_config is None:
-            ppo_config = OmegaConf.create({
-                "gamma": 0.99,
-                "learning_rate": 0.0003,
-                "clip_range": 0.2,
-                "value_coef": 0.5,
-                "entropy_coef": 0.01,
-                "gae_lambda": 0.95,
-                "max_grad_norm": 0.5,
-                "ppo_epochs": 10,
-                "batch_size": 256,
-                "buffer_size": 2048,
-                "network": {"hidden_dims": [256, 256]}
-            })
-        return DronePPOAgent(obs_space, act_space, ppo_config, device)
-    
-    elif agent_type == AgentType.SAC:
-        sac_config = getattr(config, 'sac', None)
-        if sac_config is None:
-            sac_config = OmegaConf.create({
-                "gamma": 0.99,
-                "learning_rate": 0.0003,
-                "tau": 0.005,
-                "alpha": 0.2,
-                "automatic_entropy_tuning": True,
-                "target_update_interval": 1,
-                "batch_size": 256,
-                "buffer_size": 100000,
-                "warmup_steps": 1000,
-                "network": {"hidden_dims": [256, 256]}
-            })
-        return DroneSACAgent(obs_space, act_space, sac_config, device)
-    
-    elif agent_type == AgentType.RANDOM:
-        return RandomAgent(obs_space, act_space, device)
-    
-    elif agent_type == AgentType.HOVERING:
-        return HoveringAgent(obs_space, act_space, device)
-    
-    else:
-        raise ValueError(f"Unknown agent type: {agent_type}")
 
 
 def create_drone_configs(scenario_config):
@@ -274,7 +209,7 @@ def run_visualization(config: DictConfig):
             # input()
             # Environment step
             next_obs, rewards, terminations, truncations, infos = env.step(actions)
-            
+            print(rewards)
             # Track rewards
             for agent_name, reward in rewards.items():
                 episode_rewards[agent_name] += reward
