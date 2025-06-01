@@ -38,16 +38,34 @@ def create_agent(agent_type: str, config: DictConfig, obs_space, act_space, devi
         agent_type = AgentType(agent_type)
     
     if agent_type == AgentType.DQN:
-        agent_config = OmegaConf.create({
-            "gamma": config.agent.gamma,
-            "learning_rate": config.agent.learning_rate,
-            "epsilon_start": config.agent.epsilon_start,
-            "epsilon_end": config.agent.epsilon_end,
-            "epsilon_decay": config.agent.epsilon_decay,
-            "batch_size": config.agent.batch_size,
-            "network": config.agent.network,
-            "buffer_size": config.agent.buffer_size
-        })
+        # Use agent config if available, otherwise create default
+        if hasattr(config, 'agent') and config.agent is not None:
+            agent_config = OmegaConf.create({
+                "gamma": getattr(config.agent, 'gamma', 0.99),
+                "learning_rate": getattr(config.agent, 'learning_rate', 0.0005),
+                "epsilon_start": getattr(config.agent, 'epsilon_start', 1.0),
+                "epsilon_end": getattr(config.agent, 'epsilon_end', 0.05),
+                "epsilon_decay": getattr(config.agent, 'epsilon_decay', 900000),
+                "batch_size": getattr(config.agent, 'batch_size', 64),
+                "network": getattr(config.agent, 'network', {"hidden_dims": [120, 84, 84]}),
+                "buffer_size": getattr(config.agent, 'buffer_size', 100000),
+                "target_update_interval": getattr(config.agent, 'target_update_interval', 1000),
+                "soft_update_tau": getattr(config.agent, 'soft_update_tau', 0.005)
+            })
+        else:
+            # Default DQN config
+            agent_config = OmegaConf.create({
+                "gamma": 0.99,
+                "learning_rate": 0.0005,
+                "epsilon_start": 1.0,
+                "epsilon_end": 0.05,
+                "epsilon_decay": 900000,
+                "batch_size": 64,
+                "network": {"hidden_dims": [120, 84, 84]},
+                "buffer_size": 100000,
+                "target_update_interval": 1000,
+                "soft_update_tau": 0.005
+            })
         return DroneDQNAgent(obs_space, act_space, agent_config, device)
     
     elif agent_type == AgentType.PPO:
@@ -145,8 +163,8 @@ def evaluate_agents(agents: dict, config: DictConfig, global_step: int, scenario
     out_of_bounds_count = 0
     timeout_count = 0
     
-    # Detailed episode tracking for WandB
-    episode_details = []
+    # Outcome mapping for numeric logging (to avoid WandB string warnings)
+    outcome_codes = {"capture": 1, "collision": 2, "out_of_bounds": 3, "timeout": 4}
     
     for episode in range(config.training.eval_episodes):
         obs, _ = eval_env.reset()
@@ -156,7 +174,8 @@ def evaluate_agents(agents: dict, config: DictConfig, global_step: int, scenario
         episode_outcome = "timeout"
         outcome_step = -1
         
-        while not done and step_count < 500:
+        # Use natural episode termination instead of hardcoded step limits
+        while not done:
             actions = {}
             
             # Select actions
@@ -179,32 +198,25 @@ def evaluate_agents(agents: dict, config: DictConfig, global_step: int, scenario
                     episode_outcome = "capture"
                     outcome_step = step_count
                     capture_count += 1
+                    break  # Exit early on capture
                 elif info.get("collision", False):
                     episode_outcome = "collision"
                     outcome_step = step_count
                     collision_count += 1
+                    break  # Exit early on collision
                 elif info.get("out_of_bounds", False):
                     episode_outcome = "out_of_bounds"
                     outcome_step = step_count
                     out_of_bounds_count += 1
+                    break  # Exit early on out of bounds
             
             done = all(terminations.values()) or all(truncations.values())
             obs = next_obs
         
-        # Finalize episode
-        if step_count >= 500 and episode_outcome == "timeout":
+        # Finalize episode outcome - if no specific event occurred, it's a timeout
+        if episode_outcome == "timeout":
             timeout_count += 1
             outcome_step = step_count
-        
-        # Store episode details
-        episode_info = {
-            'episode_num': episode + 1,
-            'length': step_count,
-            'outcome': episode_outcome,
-            'outcome_step': outcome_step,
-            'rewards': episode_reward.copy()
-        }
-        episode_details.append(episode_info)
         
         # Update totals
         for agent_name in agent_names:
@@ -221,7 +233,7 @@ def evaluate_agents(agents: dict, config: DictConfig, global_step: int, scenario
     out_of_bounds_rate = out_of_bounds_count / config.training.eval_episodes
     timeout_rate = timeout_count / config.training.eval_episodes
     
-    # Log results to WandB
+    # Log results to WandB (GRAPH FORMAT ONLY - NO TABLES)
     if config.wandb.mode != "disabled":
         # Main metrics
         log_dict = {
@@ -244,47 +256,6 @@ def evaluate_agents(agents: dict, config: DictConfig, global_step: int, scenario
         
         # Log main metrics
         wandb.log(log_dict)
-        
-        # Log detailed episode information
-        for ep_info in episode_details:
-            episode_log = {
-                f"eval/episode_{ep_info['episode_num']}_length": ep_info['length'],
-                f"eval/episode_{ep_info['episode_num']}_outcome": ep_info['outcome'],
-                f"eval/episode_{ep_info['episode_num']}_outcome_step": ep_info['outcome_step'],
-                "global_step": global_step
-            }
-            
-            # Add episode rewards for each agent
-            for agent_name in agent_names:
-                role = eval_env.agent_roles[agent_name]
-                episode_log[f"eval/episode_{ep_info['episode_num']}_{agent_name}_{role.name.lower()}_reward"] = ep_info['rewards'][agent_name]
-            
-            wandb.log(episode_log)
-        
-        # Create a summary table for this evaluation
-        episode_table_data = []
-        for ep_info in episode_details:
-            row = [
-                ep_info['episode_num'],
-                ep_info['length'],
-                ep_info['outcome'],
-                ep_info['outcome_step']
-            ]
-            # Add rewards for each agent
-            for agent_name in agent_names:
-                row.append(round(ep_info['rewards'][agent_name], 2))
-            
-            episode_table_data.append(row)
-        
-        # Create table headers
-        headers = ["Episode", "Length", "Outcome", "Outcome_Step"]
-        for agent_name in agent_names:
-            role = eval_env.agent_roles[agent_name]
-            headers.append(f"{agent_name}_{role.name}_Reward")
-        
-        # Log evaluation summary table
-        eval_table = wandb.Table(data=episode_table_data, columns=headers)
-        wandb.log({f"eval/episode_summary_step_{global_step}": eval_table, "global_step": global_step})
     
     print(f"Evaluation results:")
     print(f"  Average episode length: {avg_length:.1f}")
@@ -452,13 +423,12 @@ def run_training_loop(config: DictConfig, env, agents: dict, agent_names: list, 
                 
                 # Log metrics for trainable agents
                 if global_step % config.training.log_interval == 0 and config.wandb.mode != "disabled":
-                    # Check if this is a trainable agent (has meaningful loss)
-                    if metrics.get("loss", 0) > 0 or hasattr(agents[agent_name], 'replay_buffer'):
-                        for metric_name, metric_value in metrics.items():
-                            wandb.log({
-                                f"train/{agent_name}_{metric_name}": metric_value,
-                                "global_step": global_step
-                            })
+
+                    for metric_name, metric_value in metrics.items():
+                        wandb.log({
+                            f"train/{agent_name}_{metric_name}": metric_value,
+                            "global_step": global_step
+                        })
             elif agent_name in episode_rewards:
                 # Still track episode rewards for missing agents
                 episode_rewards[agent_name] += rewards.get(agent_name, 0)
