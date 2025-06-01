@@ -105,16 +105,11 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
         self.out_of_bounds_penalty = env_config.get('out_of_bounds_penalty', -30.0)
         self.distance_reward_coef = env_config.get('distance_reward_coef', 2.0)
         self.evader_survival_reward = env_config.get('evader_survival_reward', 0.1)
-        self.evader_safe_distance = env_config.get('evader_safe_distance', 2.0)
-        self.evader_safe_distance_reward = env_config.get('evader_safe_distance_reward', 0.5)
         self.pursuer_proximity_threshold = env_config.get('pursuer_proximity_threshold', 1.0)
         self.pursuer_proximity_coef = env_config.get('pursuer_proximity_coef', 1.0)
         self.time_reward_coef = env_config.get('time_reward_coef', 0.01)
         self.max_episode_steps = env_config.get('max_episode_steps', 500)
         
-        # Add missing altitude parameters
-        self.target_altitude = env_config.get('target_altitude', 1.0)
-        self.altitude_penalty_coef = env_config.get('altitude_penalty_coef', 0.1)
         
         # Initialize step counter
         self.step_count = 0
@@ -322,13 +317,7 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
         if current_distance < self.pursuer_proximity_threshold:
             proximity_reward = self.pursuer_proximity_coef * (self.pursuer_proximity_threshold - current_distance)
             reward += proximity_reward
-        
-        # ADDED: Altitude maintenance reward - penalize deviation from target altitude
-        current_pos = self.aviary.state(agent_id)[-1]
-        altitude_deviation = abs(current_pos[2] - self.target_altitude)
-        altitude_penalty = -self.altitude_penalty_coef * altitude_deviation
-        reward += altitude_penalty
-        
+                
         return reward, capture
     
     def compute_evader_reward(
@@ -367,16 +356,7 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
         # Survival bonus
         reward += self.evader_survival_reward
         
-        # Bonus for maintaining safe distance
-        if current_distance > self.evader_safe_distance:
-            reward += self.evader_safe_distance_reward
-        
-        # ADDED: Altitude maintenance reward - penalize deviation from target altitude
-        current_pos = self.aviary.state(agent_id)[-1]
-        altitude_deviation = abs(current_pos[2] - self.target_altitude)
-        altitude_penalty = -self.altitude_penalty_coef * altitude_deviation
-        reward += altitude_penalty
-        
+                
         return reward, capture
     
     def assign_agent_roles(self):
@@ -420,40 +400,18 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
         other_agent_id = 1 if agent_id == 0 else 0
         
         # Assign roles if not already assigned
-        if len(self.agent_roles) == 0:
-            self.assign_agent_roles()
-        
         agent_name = [name for name, id in self.agent_name_mapping.items() if id == agent_id][0]
         
         # Compute role-based rewards
-        if agent_name in self.agent_roles:
-            if self.agent_roles[agent_name] == DroneRole.PURSUER:
-                reward, capture = self.compute_pursuer_reward(agent_id, other_agent_id, collision, out_of_bounds)
-            else:  # EVADER
-                reward, capture = self.compute_evader_reward(agent_id, other_agent_id, collision, out_of_bounds)
-            
-            # Add capture information to info
-            if capture:
-                info["capture"] = True
-                term |= True  # End episode on capture
-        else:
-            # Fallback to basic reward
-            linear_distance = self.compute_distance_between_agents(agent_id, other_agent_id)
-            
-            # Basic penalties
-            if collision:
-                reward -= 10.0
-            if out_of_bounds:
-                reward -= 10.0
-            
-            # Basic capture reward/penalty
-            if linear_distance < self.capture_threshold:
-                if agent_id == 0:  # Assume pursuer is agent 0
-                    reward += 10.0
-                else:  # Assume evader is agent 1
-                    reward -= 10.0
-                info["capture"] = True
-                term |= True
+        if self.agent_roles[agent_name] == DroneRole.PURSUER:
+            reward, capture = self.compute_pursuer_reward(agent_id, other_agent_id, collision, out_of_bounds)
+        else:  # EVADER
+            reward, capture = self.compute_evader_reward(agent_id, other_agent_id, collision, out_of_bounds)
+        
+        # Add capture information to info
+        if capture:
+            info["capture"] = True
+            term |= True  # End episode on capture
 
         return term, trunc, reward, info
 
@@ -511,7 +469,7 @@ class LidarDroneBaseEnv(MAQuadXHoverEnv):
             ag_id = self.agent_name_mapping[ag]
             # compute term trunc reward
             term, trunc, rew, info = self.compute_term_trunc_reward_info_by_id(
-                ag_id, getattr(self, 'prev_observations', {})
+                ag_id, self.prev_observations
             )
             terminations[ag] |= term
             truncations[ag] |= trunc
