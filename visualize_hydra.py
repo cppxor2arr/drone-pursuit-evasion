@@ -44,11 +44,11 @@ def create_drone_configs(scenario_config):
 
 
 def load_pretrained_agents(config: DictConfig, env, agent_names: list, device: str) -> dict:
-    """Load pretrained agents from specified model paths"""
+    """Load pretrained agents from scenario resume_from paths"""
     agents = {}
     drone_configs = create_drone_configs(config.scenario)
     
-    print("\n🤖 Loading pretrained agents...")
+    print("\n🤖 Loading agents...")
     
     for i, agent_name in enumerate(agent_names):
         role = env.agent_roles[agent_name]
@@ -63,69 +63,15 @@ def load_pretrained_agents(config: DictConfig, env, agent_names: list, device: s
         act_space = env.action_space(agent_name)
         
         # Create agent
-        agent = create_agent(drone_config.agent_type, config, obs_space, act_space, device)
+        agent = create_agent(drone_config.agent_type, config, obs_space, act_space, device, for_visualization=True)
         
-        # Load pretrained weights if specified
-        model_path = None
-        if hasattr(config.visualization, 'model_paths') and agent_name in config.visualization.model_paths:
-            model_path = config.visualization.model_paths[agent_name]
-        elif hasattr(config.visualization, 'weights_dir') and config.visualization.weights_dir:
-            # Use specified weights directory
-            weights_dir = Path(config.visualization.weights_dir)
+        # Load pretrained weights if resume_from is specified
+        model_path = drone_config.resume_from
+        if model_path is not None:
+            agent.load(model_path)
+            print(f"  ✅ Loaded {drone_config.agent_type.value.upper()} {role.name} from: {model_path}")
         else:
-            # Auto-detect latest weights from experiment
-            experiment_name = getattr(config, 'experiment_name', 'drone_pursuit_evasion')
-            weights_base = Path(getattr(config, 'paths', {}).get('weights_dir', 'weights'))
-            
-            # Try to find latest directory
-            latest_dir = weights_base / experiment_name / "latest"
-            if latest_dir.exists():
-                weights_dir = latest_dir
-                print(f"  🔍 Found latest weights: {weights_dir}")
-            else:
-                # Fallback: find most recent timestamped directory
-                experiment_dir = weights_base / experiment_name
-                if experiment_dir.exists():
-                    timestamp_dirs = [d for d in experiment_dir.iterdir() 
-                                    if d.is_dir() and d.name != "latest"]
-                    if timestamp_dirs:
-                        weights_dir = max(timestamp_dirs, key=lambda x: x.stat().st_mtime)
-                        print(f"  🔍 Found recent weights: {weights_dir}")
-                    else:
-                        weights_dir = None
-                        print(f"  ⚠️ No weight directories found in {experiment_dir}")
-                else:
-                    weights_dir = None
-                    print(f"  ⚠️ Experiment directory not found: {experiment_dir}")
-        
-        if weights_dir:
-            # Auto-detect model path based on role
-            role_name = role.name.lower()
-            
-            # Try different naming patterns
-            possible_names = [
-                f"{role_name}_final.pt",
-                f"{role_name}_best.pt", 
-                f"{role_name}_0.pt"
-            ]
-            
-            for name in possible_names:
-                potential_path = weights_dir / name
-                if potential_path.exists():
-                    model_path = potential_path
-                    break
-        
-        if model_path and os.path.exists(model_path):
-            try:
-                agent.load(model_path)
-                print(f"  ✅ Loaded {drone_config.agent_type.value.upper()} {role.name} from: {model_path}")
-            except Exception as e:
-                print(f"  ❌ Failed to load model for {agent_name}: {e}")
-                print(f"  ℹ️ Using randomly initialized {drone_config.agent_type.value.upper()} agent")
-        else:
-            if weights_dir:
-                print(f"  ⚠️ No model found for {agent_name} ({role.name}) in {weights_dir}")
-            print(f"  ℹ️ Using randomly initialized {drone_config.agent_type.value.upper()}")
+            print(f"  ℹ️ No model to load for {drone_config.agent_type.value.upper()} {role.name} (using random initialization)")
         
         # Set to evaluation mode
         agent.eval()
