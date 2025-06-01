@@ -102,11 +102,12 @@ class DroneSACAgent(BaseRLAgent):
         
         # For discrete action spaces, we'll treat it as continuous and discretize
         if hasattr(action_space, 'n'):
-            self.action_dim = action_space.n
+            self.discrete_action_count = action_space.n
+            self.action_dim = 1  # Use 1D continuous action for discrete spaces
             self.discrete_actions = True
         else:
             self.action_dim = action_space.shape[0]
-            self.discrete_actions = True  # Assume discrete for drone control
+            self.discrete_actions = False
         
         # SAC hyperparameters
         self.gamma = config.gamma
@@ -172,7 +173,7 @@ class DroneSACAgent(BaseRLAgent):
         if training and self.total_steps < self.warmup_steps:
             # Random action during warmup
             if self.discrete_actions:
-                return np.random.randint(0, self.action_dim)
+                return np.random.randint(0, self.discrete_action_count)
             else:
                 return np.random.uniform(-1, 1, self.action_dim)
         
@@ -190,12 +191,12 @@ class DroneSACAgent(BaseRLAgent):
         action = action.cpu().numpy()[0]
         
         if self.discrete_actions:
-            # Convert continuous action to discrete
-            # Scale from [-1, 1] to [0, action_dim-1]
-            action = np.clip(action, -1, 1)
-            action = ((action + 1) / 2 * self.action_dim).astype(int)
-            action = np.clip(action, 0, self.action_dim - 1)
-            return action[0] if len(action) == 1 else action
+            # Convert 1D continuous action to discrete index
+            # Scale from [-1, 1] to [0, discrete_action_count-1]
+            action_val = np.clip(action[0], -1, 1)  # Get the single action value
+            discrete_action = int((action_val + 1) / 2 * self.discrete_action_count)
+            discrete_action = np.clip(discrete_action, 0, self.discrete_action_count - 1)
+            return discrete_action
         
         return action
     
@@ -205,9 +206,8 @@ class DroneSACAgent(BaseRLAgent):
         
         # Store transition in replay buffer
         if self.discrete_actions:
-            # Convert discrete action to continuous for storage
-            action_cont = np.array([action], dtype=np.float32)
-            action_cont = (action_cont / (self.action_dim - 1)) * 2 - 1  # Scale to [-1, 1]
+            # Convert discrete action to 1D continuous for storage
+            action_cont = np.array([(action / (self.discrete_action_count - 1)) * 2 - 1], dtype=np.float32)
         else:
             action_cont = action
         
@@ -259,7 +259,7 @@ class DroneSACAgent(BaseRLAgent):
             target_q1 = self.target_critic1(next_state, next_action)
             target_q2 = self.target_critic2(next_state, next_action)
             target_q = torch.min(target_q1, target_q2) - self.alpha * next_log_prob
-            target_q = reward + (1 - done) * self.gamma * target_q
+            target_q = reward.unsqueeze(1) + (1 - done.unsqueeze(1)) * self.gamma * target_q
         
         # Critic 1 loss
         current_q1 = self.critic1(state, action)
